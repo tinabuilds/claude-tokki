@@ -236,6 +236,9 @@ void setup() {
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     ui_show_screen(SCREEN_SPLASH);
+#ifdef BOARD_SIM
+    if (getenv("SIM_START_USAGE")) ui_show_screen(SCREEN_USAGE);   // headless shots of the usage view
+#endif
 
     Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
         board_caps().name, W, H);

@@ -8,6 +8,7 @@
 #include "hal/board_caps.h"
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
+LV_FONT_DECLARE(font_tiempos_120);
 LV_FONT_DECLARE(font_tiempos_56);
 LV_FONT_DECLARE(font_tiempos_34);
 LV_FONT_DECLARE(font_styrene_48);
@@ -47,6 +48,9 @@ struct Layout {
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
     int16_t anim_y;                  // status line offset from bottom
+    bool    ring;                    // ring-gauge usage view (480x480 only)
+    int16_t ring_cy;                 // ring center y
+    int16_t ring_d;                  // outer (weekly) ring diameter
     bool    small_icons;             // 40px logo + 24px battery (vs 80/48) on small screens
     int16_t title_nudge;             // title x-shift balancing the corner logo
     int16_t logo_y;                  // logo top edge
@@ -102,10 +106,14 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y2 = 120;
     L.pair_y3 = 160;
     L.idle_px = 160;
+    L.ring = false;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
         L.content_y = 100;
+        L.ring = true;
+        L.ring_cy = 262;
+        L.ring_d = 316;
         L.usage_panel_h = 150;
         L.usage_panel_gap = 16;
         L.usage_bar_y = 56;
@@ -215,6 +223,15 @@ static lv_obj_t* panel_weekly = nullptr;
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
 static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
 static lv_obj_t* lbl_spending_status = nullptr;   // "Under pace" / "On pace" / "Over pace"
+// Ring-gauge view (L.ring): thick inner arc = 5-hour session, thin outer arc = weekly
+static lv_obj_t* ring_group = nullptr;
+static lv_obj_t* arc_session;
+static lv_obj_t* arc_weekly;
+static lv_obj_t* lbl_ring_caption;
+static lv_obj_t* lbl_ring_pct;
+static lv_obj_t* lbl_ring_pct_sym;
+static lv_obj_t* lbl_ring_reset;
+static lv_obj_t* lbl_ring_week;
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -416,6 +433,118 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     return panel;
 }
 
+// Gauge arc opening at the bottom (270 degrees). Display-only: no knob, not
+// clickable, taps bubble up to the container's splash toggle.
+static lv_obj_t* make_ring_arc(lv_obj_t* parent, int d, int w) {
+    lv_obj_t* arc = lv_arc_create(parent);
+    lv_obj_set_size(arc, d, d);
+    lv_arc_set_rotation(arc, 135);
+    lv_arc_set_bg_angles(arc, 0, 270);
+    lv_arc_set_range(arc, 0, 100);
+    lv_arc_set_value(arc, 0);
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(arc, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_pad_all(arc, 0, 0);
+    lv_obj_set_style_arc_width(arc, w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, COL_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, COL_GREEN, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+    lv_obj_align(arc, LV_ALIGN_TOP_MID, 0, L.ring_cy - d / 2);
+    return arc;
+}
+
+static lv_obj_t* make_ring_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t col) {
+    lv_obj_t* lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, "");
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, col, 0);
+    return lbl;
+}
+
+static void build_ring_group(lv_obj_t* parent) {
+    ring_group = lv_obj_create(parent);
+    lv_obj_set_size(ring_group, L.scr_w, L.scr_h);
+    lv_obj_set_pos(ring_group, 0, 0);
+    lv_obj_set_style_bg_opa(ring_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ring_group, 0, 0);
+    lv_obj_set_style_pad_all(ring_group, 0, 0);
+    lv_obj_clear_flag(ring_group, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(ring_group, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    arc_weekly  = make_ring_arc(ring_group, L.ring_d, 8);
+    arc_session = make_ring_arc(ring_group, L.ring_d - 44, 26);
+
+    lbl_ring_caption = make_ring_label(ring_group, &font_styrene_20, COL_DIM);
+    lv_label_set_text(lbl_ring_caption, "5-HOUR");
+    lv_obj_set_style_text_letter_space(lbl_ring_caption, 3, 0);
+    lv_obj_align(lbl_ring_caption, LV_ALIGN_TOP_MID, 0, L.ring_cy - 102);
+
+    lbl_ring_pct = make_ring_label(ring_group, &font_tiempos_120, COL_TEXT);
+    lv_label_set_text(lbl_ring_pct, "--");
+    lv_obj_align(lbl_ring_pct, LV_ALIGN_TOP_MID, 0, L.ring_cy - 62);
+
+    lbl_ring_pct_sym = make_ring_label(ring_group, &font_styrene_28, COL_DIM);
+    lv_label_set_text(lbl_ring_pct_sym, "%");
+
+    lbl_ring_reset = make_ring_label(ring_group, &font_styrene_20, COL_DIM);
+    lv_obj_align(lbl_ring_reset, LV_ALIGN_TOP_MID, 0, L.ring_cy + 46);
+
+    // Weekly readout sits in the gap at the bottom of the gauge
+    lbl_ring_week = make_ring_label(ring_group, &font_styrene_24, COL_TEXT);
+    lv_label_set_recolor(lbl_ring_week, true);
+    lv_obj_align(lbl_ring_week, LV_ALIGN_TOP_MID, 0, L.ring_cy + L.ring_d / 2 - 44);
+}
+
+static void format_reset_short(int mins, char* buf, size_t len) {
+    if (mins < 0)          snprintf(buf, len, "---");
+    else if (mins < 60)    snprintf(buf, len, "%dm", mins);
+    else if (mins < 1440)  snprintf(buf, len, "%dh %dm", mins / 60, mins % 60);
+    else                   snprintf(buf, len, "%dd %dh", mins / 1440, (mins % 1440) / 60);
+}
+
+static void show_ring(bool on) {
+    if (!ring_group) return;
+    if (on) {
+        lv_obj_clear_flag(ring_group, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(panel_session, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ring_group, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(panel_session, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void update_ring(const UsageData* data) {
+    char buf[48], rbuf[24];
+    int s_pct = (int)(data->session_pct + 0.5f);
+    int w_pct = (int)(data->weekly_pct + 0.5f);
+
+    lv_arc_set_value(arc_session, s_pct);
+    lv_obj_set_style_arc_color(arc_session, pct_color(data->session_pct), LV_PART_INDICATOR);
+    lv_arc_set_value(arc_weekly, w_pct);
+    lv_obj_set_style_arc_color(arc_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
+
+    lv_label_set_text_fmt(lbl_ring_pct, "%d", s_pct);
+    lv_obj_align(lbl_ring_pct, LV_ALIGN_TOP_MID, -8, L.ring_cy - 62);
+    lv_obj_align_to(lbl_ring_pct_sym, lbl_ring_pct, LV_ALIGN_OUT_RIGHT_TOP, 4, 14);
+
+    format_reset_short(data->session_reset_mins, rbuf, sizeof(rbuf));
+    snprintf(buf, sizeof(buf), "resets in %s", rbuf);
+    lv_label_set_text(lbl_ring_reset, buf);
+    lv_obj_align(lbl_ring_reset, LV_ALIGN_TOP_MID, 0, L.ring_cy + 46);
+
+    format_reset_short(data->weekly_reset_mins, rbuf, sizeof(rbuf));
+    lv_color_t wc = pct_color(data->weekly_pct);
+    snprintf(buf, sizeof(buf), "#%02x%02x%02x Week %d%%#  #b0aea5 %s#",
+             wc.red, wc.green, wc.blue, w_pct, rbuf);
+    lv_label_set_text(lbl_ring_week, buf);
+    lv_obj_align(lbl_ring_week, LV_ALIGN_TOP_MID, 0, L.ring_cy + L.ring_d / 2 - 44);
+}
+
 // Pairing hint — shown when disconnected so the screen isn't empty and the
 // user knows how to (re)pair. Wording matches the 3-second release gesture.
 static void build_pair_group(lv_obj_t* parent) {
@@ -531,6 +660,11 @@ static void init_usage_screen(lv_obj_t* scr) {
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
 
+    if (L.ring) {
+        build_ring_group(usage_group);
+        show_ring(true);
+    }
+
     build_pair_group(usage_container);
     build_idle_group(usage_container);
 
@@ -633,6 +767,11 @@ void ui_update(const UsageData* data) {
         clock_base_epoch = 0;
         clock_last_min = -1;
         lv_label_set_text(lbl_title, "Usage");
+    }
+
+    if (L.ring) {
+        show_ring(!data->enterprise);
+        if (!data->enterprise) { update_ring(data); return; }
     }
 
     int s_pct = (int)(data->session_pct + 0.5f);

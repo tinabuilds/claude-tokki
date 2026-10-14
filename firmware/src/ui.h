@@ -1,10 +1,12 @@
 #pragma once
 #include "data.h"
 #include "ble.h"
+#include "printer.h"
 
 enum screen_t {
     SCREEN_SPLASH,
     SCREEN_USAGE,
+    SCREEN_PRINTER,
     SCREEN_COUNT,
 };
 
@@ -20,3 +22,7 @@ void ui_update_battery(int percent, bool charging, bool usb_power);  // percent 
 // tap, after 2 minutes, or ui_hide_alert() when the session moves on.
 void ui_show_alert(const char* message);
 void ui_hide_alert(void);
+// Printer page (Bambu status over LAN). ui_printer_event() jumps to it and
+// pulses the ring — called when a print finishes or fails.
+void ui_update_printer(const PrinterState* ps);
+void ui_printer_event(void);

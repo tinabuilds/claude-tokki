@@ -12,6 +12,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
+#include "printer.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -129,7 +130,7 @@ static bool parse_json(const char* json, UsageData* out) {
 }
 
 // ---- Serial command buffer ----
-#define CMD_BUF_SIZE 64
+#define CMD_BUF_SIZE 512   // fits "printer {json}" config lines
 static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_pos = 0;
 
@@ -178,6 +179,9 @@ static void check_serial_cmd() {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
+            else if (strncmp(cmd_buf, "printer ", 8) == 0) {
+                if (!printer_config_cmd(cmd_buf + 8)) Serial.println("printer: bad config");
+            }
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -231,6 +235,7 @@ void setup() {
 
     ble_init();
     input_hal_init();
+    printer_init();
 
     ui_init();
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
@@ -238,6 +243,7 @@ void setup() {
     ui_show_screen(SCREEN_SPLASH);
 #ifdef BOARD_SIM
     if (getenv("SIM_START_USAGE")) ui_show_screen(SCREEN_USAGE);   // headless shots of the usage view
+    if (getenv("SIM_START_PRINTER")) ui_show_screen(SCREEN_PRINTER);
 #endif
 
     Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
@@ -380,6 +386,25 @@ void loop() {
     }
 
     check_serial_cmd();
+
+    // Printer page: feed the UI, and jump to it when a print ends.
+    {
+        static PrinterState ps;
+        static char last_state[12] = "";
+        if (printer_get(&ps)) {
+            bool was_active = !strcmp(last_state, "RUNNING") || !strcmp(last_state, "PAUSE")
+                           || !strcmp(last_state, "PREPARE");
+            bool ended  = !strcmp(ps.gcode_state, "FINISH") || !strcmp(ps.gcode_state, "FAILED");
+            ui_update_printer(&ps);
+            if (was_active && ended) {
+                Serial.printf("printer: print %s\n", ps.gcode_state);
+                idle_note_activity();
+                ui_printer_event();
+                sound_hal_play_reset();
+            }
+            strcpy(last_state, ps.gcode_state);
+        }
+    }
 
     if (ble_has_data()) {
         if (parse_json(ble_get_data(), &usage)) {

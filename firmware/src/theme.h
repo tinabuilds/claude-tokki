@@ -12,3 +12,4 @@
 #define THEME_AMBER    lv_color_hex(0xd97757)
 #define THEME_RED      lv_color_hex(0xc0392b)
 #define THEME_BAR_BG   lv_color_hex(0x2a2a28)   // unfilled bar track
+#define THEME_BAMBU    lv_color_hex(0xc8e63c)   // printer page accent (P2S UI lime, matched by eye)

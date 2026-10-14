@@ -197,6 +197,7 @@ static void compute_layout(const BoardCaps& c) {
 #define COL_AMBER     THEME_AMBER
 #define COL_RED       THEME_RED
 #define COL_BAR_BG    THEME_BAR_BG
+#define COL_BAMBU     THEME_BAMBU
 
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
@@ -232,6 +233,19 @@ static lv_obj_t* lbl_ring_pct;
 static lv_obj_t* lbl_ring_pct_sym;
 static lv_obj_t* lbl_ring_reset;
 static lv_obj_t* lbl_ring_week;
+// Printer page
+static lv_obj_t* printer_container = nullptr;
+static lv_obj_t* arc_print;
+static lv_obj_t* lbl_pr_caption;
+static lv_obj_t* lbl_pr_pct;
+static lv_obj_t* lbl_pr_pct_sym;
+static lv_obj_t* lbl_pr_word;      // "Idle" / messages instead of the big number
+static lv_obj_t* lbl_pr_line1;     // time left
+static lv_obj_t* lbl_pr_line2;     // layer + temps
+static lv_obj_t* lbl_pr_task;      // file name at the bottom
+static lv_obj_t* pr_dots[PRINTER_TRAYS];
+static lv_obj_t* pr_icon_head = nullptr;   // pixel printer's toolhead (slides while printing)
+static bool      pr_head_moving = false;
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -610,7 +624,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(usage_container, global_click_cb, LV_EVENT_CLICKED, NULL);
 
-    lbl_title = lv_label_create(usage_container);
+    lbl_title = lv_label_create(scr);
     lv_label_set_text(lbl_title, "Usage");
     lv_obj_set_style_text_font(lbl_title, L.title_font, 0);
     lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
@@ -700,6 +714,237 @@ static void init_alert(void) {
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
 
+// ======== Printer Screen ========
+
+// Corner icon for the printer page: a small pixel-art printer in the same
+// chunky style as the corner Clawd. 16x12 cells of 5 px.
+static lv_obj_t* px_rect(lv_obj_t* parent, int cx, int cy, int cw, int ch, lv_color_t col) {
+    const int c = 5;
+    lv_obj_t* r = lv_obj_create(parent);
+    lv_obj_set_pos(r, cx * c, cy * c);
+    lv_obj_set_size(r, cw * c, ch * c);
+    lv_obj_set_style_bg_color(r, col, 0);
+    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(r, 0, 0);
+    lv_obj_set_style_radius(r, 0, 0);
+    lv_obj_set_style_pad_all(r, 0, 0);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_CLICKABLE);
+    return r;
+}
+
+static void build_printer_icon(lv_obj_t* parent) {
+    lv_obj_t* box = lv_obj_create(parent);
+    lv_obj_set_size(box, 80, 60);
+    lv_obj_set_pos(box, L.margin, L.logo_y + (LOGO_HEIGHT - 60) / 2);
+    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_pad_all(box, 0, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+
+    px_rect(box, 0, 0, 16, 1, COL_BAMBU);    // top
+    px_rect(box, 0, 11, 16, 1, COL_BAMBU);   // base
+    px_rect(box, 0, 0, 1, 12, COL_BAMBU);    // sides
+    px_rect(box, 15, 0, 1, 12, COL_BAMBU);
+    px_rect(box, 1, 2, 14, 1, COL_DIM);      // gantry rail
+    px_rect(box, 2, 9, 12, 1, COL_DIM);      // bed
+    px_rect(box, 6, 7, 4, 2, COL_BAMBU);     // the part being printed
+
+    pr_icon_head = lv_obj_create(box);       // toolhead + nozzle, slides on the rail
+    lv_obj_set_size(pr_icon_head, 15, 25);
+    lv_obj_set_pos(pr_icon_head, 35, 10);
+    lv_obj_set_style_bg_opa(pr_icon_head, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(pr_icon_head, 0, 0);
+    lv_obj_set_style_pad_all(pr_icon_head, 0, 0);
+    lv_obj_clear_flag(pr_icon_head, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(pr_icon_head, LV_OBJ_FLAG_CLICKABLE);
+    px_rect(pr_icon_head, 0, 0, 3, 3, COL_TEXT);
+    px_rect(pr_icon_head, 1, 3, 1, 1, COL_TEXT);
+}
+
+static void head_x_cb(void* obj, int32_t v) { lv_obj_set_x((lv_obj_t*)obj, v); }
+
+static void printer_icon_animate(bool on) {
+    if (!pr_icon_head || on == pr_head_moving) return;
+    pr_head_moving = on;
+    lv_anim_delete(pr_icon_head, head_x_cb);
+    if (!on) { lv_obj_set_x(pr_icon_head, 35); return; }
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, pr_icon_head);
+    lv_anim_set_exec_cb(&a, head_x_cb);
+    lv_anim_set_values(&a, 15, 55);
+    lv_anim_set_duration(&a, 1400);
+    lv_anim_set_playback_duration(&a, 1400);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+}
+
+static void build_printer_screen(lv_obj_t* scr) {
+    printer_container = lv_obj_create(scr);
+    lv_obj_set_size(printer_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(printer_container, 0, 0);
+    lv_obj_set_style_bg_opa(printer_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(printer_container, 0, 0);
+    lv_obj_set_style_pad_all(printer_container, 0, 0);
+    lv_obj_clear_flag(printer_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(printer_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+
+    arc_print = make_ring_arc(printer_container, L.ring_d - 24, 28);
+
+    lbl_pr_caption = make_ring_label(printer_container, &font_styrene_20, COL_DIM);
+    lv_obj_set_style_text_letter_space(lbl_pr_caption, 3, 0);
+
+    lbl_pr_pct = make_ring_label(printer_container, &font_tiempos_120, COL_TEXT);
+    lbl_pr_pct_sym = make_ring_label(printer_container, &font_styrene_28, COL_DIM);
+    lv_label_set_text(lbl_pr_pct_sym, "%");
+
+    lbl_pr_word = make_ring_label(printer_container, &font_tiempos_56, COL_TEXT);
+    lbl_pr_line1 = make_ring_label(printer_container, &font_styrene_24, COL_DIM);
+    lbl_pr_line2 = make_ring_label(printer_container, &font_styrene_16, COL_DIM);
+
+    // AMS slots as filament-colored dots in the gauge's bottom gap
+    const int dot = 26, gap = 16;
+    const int x0 = (L.scr_w - (PRINTER_TRAYS * dot + (PRINTER_TRAYS - 1) * gap)) / 2;
+    for (int i = 0; i < PRINTER_TRAYS; i++) {
+        lv_obj_t* d = lv_obj_create(printer_container);
+        lv_obj_set_size(d, dot, dot);
+        lv_obj_set_pos(d, x0 + i * (dot + gap), L.ring_cy + L.ring_d / 2 - 46);
+        lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_color(d, COL_DIM, 0);
+        lv_obj_set_style_border_opa(d, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(d, 2, 0);
+        lv_obj_set_style_pad_all(d, 0, 0);
+        lv_obj_clear_flag(d, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(d, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(d, LV_OBJ_FLAG_EVENT_BUBBLE);
+        pr_dots[i] = d;
+    }
+
+    build_printer_icon(printer_container);
+
+    lbl_pr_task = make_ring_label(printer_container, &font_styrene_20, COL_DIM);
+    lv_label_set_long_mode(lbl_pr_task, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl_pr_task, L.content_w - 40);
+    lv_obj_set_style_text_align(lbl_pr_task, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(lbl_pr_task, LV_ALIGN_BOTTOM_MID, 0, -22);
+
+    lv_obj_add_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void format_left(int mins, char* buf, size_t len) {
+    if (mins <= 0)        snprintf(buf, len, "almost done");
+    else if (mins < 60)   snprintf(buf, len, "%dm left", mins);
+    else                  snprintf(buf, len, "%dh %02dm left", mins / 60, mins % 60);
+}
+
+// Big centered word instead of the percentage (idle, setup and error states)
+static void printer_show_word(const char* caption, const char* word, const char* line1) {
+    lv_obj_set_style_text_color(lbl_pr_caption, COL_DIM, 0);
+    // "Idle" gets the big serif; longer messages must fit inside the ring
+    lv_obj_set_style_text_font(lbl_pr_word, strlen(word) <= 6 ? &font_tiempos_56 : &font_tiempos_34, 0);
+    lv_obj_add_flag(lbl_pr_pct, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(lbl_pr_pct_sym, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_pr_word, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lbl_pr_caption, caption);
+    lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, L.ring_cy - 92);
+    lv_label_set_text(lbl_pr_word, word);
+    lv_obj_align(lbl_pr_word, LV_ALIGN_TOP_MID, 0, L.ring_cy - 46);
+    lv_label_set_text(lbl_pr_line1, line1);
+    lv_obj_align(lbl_pr_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 28);
+}
+
+void ui_update_printer(const PrinterState* ps) {
+    if (!printer_container) return;
+    char buf[64], buf2[64];
+    const char* gs = ps->gcode_state;
+    bool running  = !strcmp(gs, "RUNNING") || !strcmp(gs, "PREPARE");
+    bool paused   = !strcmp(gs, "PAUSE");
+    bool finished = !strcmp(gs, "FINISH");
+    bool failed   = !strcmp(gs, "FAILED");
+
+    snprintf(buf2, sizeof(buf2), "Nozzle %dC   Bed %dC", ps->nozzle, ps->bed);
+    lv_label_set_text(lbl_pr_line2, "");
+    lv_label_set_text(lbl_pr_task, "");
+
+    if (ps->link == PRINTER_UNCONFIGURED) {
+        lv_arc_set_value(arc_print, 0);
+        printer_show_word("PRINTER", "Not set up", "set up over USB");
+    } else if (ps->link == PRINTER_AUTH_FAILED) {
+        lv_arc_set_value(arc_print, 0);
+        lv_obj_set_style_arc_color(arc_print, COL_RED, LV_PART_INDICATOR);
+        printer_show_word("PRINTER", "Code rejected", "check access code");
+    } else if (!ps->has_report) {
+        lv_arc_set_value(arc_print, 0);
+        printer_show_word("PRINTER", "Connecting", ps->link == PRINTER_WIFI ? "joining Wi-Fi" : "finding printer");
+    } else if (running || paused || finished || failed) {
+        int pct = finished ? 100 : ps->pct;
+        lv_color_t col = failed ? COL_RED : paused ? COL_DIM : COL_BAMBU;
+        lv_arc_set_value(arc_print, pct);
+        lv_obj_set_style_arc_color(arc_print, col, LV_PART_INDICATOR);
+
+        lv_obj_add_flag(lbl_pr_word, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_pr_pct, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_pr_pct_sym, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(lbl_pr_caption, failed ? COL_RED : paused ? COL_DIM : COL_BAMBU, 0);
+        lv_label_set_text(lbl_pr_caption, failed ? "FAILED" : finished ? "DONE" : paused ? "PAUSED"
+                                          : !strcmp(gs, "PREPARE") ? "PREPARING" : "PRINTING");
+        lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, L.ring_cy - 102);
+        lv_label_set_text_fmt(lbl_pr_pct, "%d", pct);
+        lv_obj_align(lbl_pr_pct, LV_ALIGN_TOP_MID, -8, L.ring_cy - 62);
+        lv_obj_align_to(lbl_pr_pct_sym, lbl_pr_pct, LV_ALIGN_OUT_RIGHT_TOP, 4, 14);
+
+        if (finished)      snprintf(buf, sizeof(buf), "ready to collect");
+        else if (failed)   snprintf(buf, sizeof(buf), "check the printer");
+        else               format_left(ps->remain_min, buf, sizeof(buf));
+        lv_label_set_text(lbl_pr_line1, buf);
+        lv_obj_align(lbl_pr_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 32);
+
+        if (ps->total_layer > 0) snprintf(buf2, sizeof(buf2), "Layer %d / %d", ps->layer, ps->total_layer);
+        lv_label_set_text(lbl_pr_line2, buf2);
+        lv_label_set_text(lbl_pr_task, ps->task);
+    } else {
+        lv_arc_set_value(arc_print, 0);
+        printer_show_word("PRINTER", "Idle", buf2);   // temps under the word
+    }
+    lv_obj_align(lbl_pr_line2, LV_ALIGN_TOP_MID, 0, L.ring_cy + 68);
+
+    printer_icon_animate(ps->has_report && running);
+
+    for (int i = 0; i < PRINTER_TRAYS; i++) {
+        lv_obj_t* d = pr_dots[i];
+        bool show = ps->has_report && i < ps->tray_count;
+        if (!show) { lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(d, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(d, lv_color_hex(ps->tray_rgb[i]), 0);
+        lv_obj_set_style_bg_opa(d, ps->tray_loaded[i] ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        bool active = (i == ps->tray_now) && (running || paused);
+        lv_obj_set_style_border_color(d, active ? COL_TEXT : COL_DIM, 0);
+        lv_obj_set_style_border_opa(d, active ? LV_OPA_COVER : LV_OPA_50, 0);
+        lv_obj_set_style_border_width(d, active ? 4 : 2, 0);
+    }
+}
+
+static void pulse_cb(void* obj, int32_t v) {
+    lv_obj_set_style_arc_opa((lv_obj_t*)obj, (lv_opa_t)v, LV_PART_INDICATOR);
+}
+
+void ui_printer_event(void) {
+    ui_hide_alert();
+    ui_show_screen(SCREEN_PRINTER);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, arc_print);
+    lv_anim_set_exec_cb(&a, pulse_cb);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_20);
+    lv_anim_set_duration(&a, 500);
+    lv_anim_set_playback_duration(&a, 500);
+    lv_anim_set_repeat_count(&a, 10);
+    lv_anim_start(&a);
+}
+
 // ======== Public API ========
 
 void ui_init(void) {
@@ -717,6 +962,7 @@ void ui_init(void) {
     init_battery_icons();
 
     init_usage_screen(scr);
+    if (L.ring) build_printer_screen(scr);
     splash_init(scr);
 
     if (splash_get_root()) {
@@ -866,7 +1112,7 @@ static void update_view_state(void) {
 }
 
 void ui_tick_anim(void) {
-    if (current_screen != SCREEN_USAGE) return;
+    if (current_screen == SCREEN_SPLASH) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
 
@@ -934,24 +1180,36 @@ static void apply_battery_visibility(void) {
 
 static void global_click_cb(lv_event_t* e) {
     (void)e;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
-    else                                  ui_show_screen(SCREEN_SPLASH);
+    if (current_screen == SCREEN_SPLASH)                         ui_show_screen(SCREEN_USAGE);
+    else if (current_screen == SCREEN_USAGE && printer_container) ui_show_screen(SCREEN_PRINTER);
+    else                                                          ui_show_screen(SCREEN_SPLASH);
 }
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
+    if (printer_container) lv_obj_add_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
 
     switch (screen) {
     case SCREEN_SPLASH:  splash_show(); break;
     case SCREEN_USAGE:   lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_PRINTER:
+        if (printer_container) {
+            lv_obj_clear_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            screen = SCREEN_USAGE;   // board without the printer page
+            lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        break;
     default: break;
     }
+    if (screen == SCREEN_SPLASH) lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
+    else                         lv_obj_clear_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
 
-    splash_mascot_set_visible(screen != SCREEN_SPLASH);
+    splash_mascot_set_visible(screen == SCREEN_USAGE);
     if (logo_img) {
-        if (screen == SCREEN_SPLASH) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
-        else                          lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        if (screen != SCREEN_USAGE) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        else                         lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
 
     if (screen != SCREEN_SPLASH) prev_non_splash_screen = screen;
@@ -1002,7 +1260,7 @@ void ui_update_battery(int percent, bool charging, bool usb_power) {
 
 void ui_show_alert(const char* message) {
     alert_active = true;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(SCREEN_USAGE);
+    if (current_screen != SCREEN_USAGE) ui_show_screen(SCREEN_USAGE);   // the mascot lives there
     splash_mascot_attention(true);
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_width(lbl_anim, L.content_w);

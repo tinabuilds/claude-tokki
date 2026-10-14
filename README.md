@@ -15,6 +15,20 @@ Branches:
 - `claude-tokki`: the Claude usage changes only
 - `printer`: the above, plus a **Bambu Lab printer status page**
 
+### Printer page (`printer` branch)
+
+Tap the screen to cycle usage → printer → Clawd. When a print finishes or fails, the screen jumps to the printer page, the ring flashes and it beeps.
+
+The board joins your Wi-Fi and talks to the printer directly over **LAN MQTT**, so it keeps working while your Mac sleeps. Built and tested against a **P2S**; other Bambu printers that speak the same local MQTT should work but are untested. 2.4 GHz Wi-Fi only.
+
+Setup (once, over USB):
+
+1. Get the printer's LAN IP, serial number and LAN access code from its touchscreen settings
+2. Save the access code to `~/.config/bambu-lan/access_code`
+3. Run `python3 tools/printer_setup.py --port /dev/cu.usbmodemXXXX --ip <printer IP> --sn <serial>`. It asks for the Wi-Fi password at a hidden prompt and writes everything to the board's NVS
+
+⚠️ Settings are stored **unencrypted** on the board. Erase flash before giving it away.
+
 Same licensing caveat as upstream applies (see below): proprietary fonts and Clawd assets, no license granted.
 
 

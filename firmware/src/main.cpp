@@ -233,20 +233,31 @@ void setup() {
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, my_touch_cb);
 
+#ifndef PRINTER_ONLY
     ble_init();
+#endif
     input_hal_init();
     printer_init();
 
     ui_init();
+#ifdef PRINTER_ONLY
+    ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
+    ui_show_screen(SCREEN_PRINTER);   // no Bluetooth, no Claude usage: the printer page is the whole device
+#else
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     ui_show_screen(SCREEN_SPLASH);
+#endif
 #ifdef BOARD_SIM
     if (getenv("SIM_START_USAGE")) ui_show_screen(SCREEN_USAGE);   // headless shots of the usage view
     if (getenv("SIM_START_PRINTER")) ui_show_screen(SCREEN_PRINTER);
 #endif
 
+#ifdef PRINTER_ONLY
+    Serial.printf("Printer screen ready (%s, %dx%d)\n",
+#else
     Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
+#endif
         board_caps().name, W, H);
 }
 
@@ -302,7 +313,9 @@ void loop() {
     idle_tick();
     lv_timer_handler();
     ui_tick_anim();
+#ifndef PRINTER_ONLY
     ble_tick();
+#endif
     power_hal_tick();
     imu_hal_tick();
     sound_hal_tick();
@@ -329,10 +342,14 @@ void loop() {
         if (primary_now != primary_was) {
             if (primary_now) {
                 if (idle_consume_wake_press()) primary_wake_swallowed = true;
+#ifndef PRINTER_ONLY
                 else                            ble_keyboard_press(0x2C, 0);  // HID Space, no mods
+#endif
             } else {
                 if (primary_wake_swallowed) primary_wake_swallowed = false;
+#ifndef PRINTER_ONLY
                 else                        ble_keyboard_release();
+#endif
             }
             primary_was = primary_now;
         }
@@ -344,10 +361,14 @@ void loop() {
             if (secondary_now != secondary_was) {
                 if (secondary_now) {
                     if (idle_consume_wake_press()) secondary_wake_swallowed = true;
+#ifndef PRINTER_ONLY
                     else                            ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+#endif
                 } else {
                     if (secondary_wake_swallowed) secondary_wake_swallowed = false;
+#ifndef PRINTER_ONLY
                     else                          ble_keyboard_release();
+#endif
                 }
                 secondary_was = secondary_now;
             }
@@ -362,14 +383,18 @@ void loop() {
             }
         }
 
+#ifndef PRINTER_ONLY
         pair_tick();
+#endif
     }
 
+#ifndef PRINTER_ONLY
     ble_state_t bs = ble_get_state();
     if (bs != last_ble_state) {
         last_ble_state = bs;
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }
+#endif
 
     static int  last_pct      = -2;
     static bool last_charging = false;
@@ -378,7 +403,9 @@ void loop() {
     bool charging = power_hal_is_charging();
     bool vbus     = power_hal_is_vbus_in();
     if (pct != last_pct || charging != last_charging || vbus != last_vbus) {
+#ifndef PRINTER_ONLY
         if (pct != last_pct) ble_set_battery_level(pct);
+#endif
         last_pct = pct;
         last_charging = charging;
         last_vbus = vbus;
@@ -406,6 +433,7 @@ void loop() {
         }
     }
 
+#ifndef PRINTER_ONLY
     if (ble_has_data()) {
         if (parse_json(ble_get_data(), &usage)) {
             int g_before = usage_rate_group();
@@ -441,6 +469,7 @@ void loop() {
             ble_send_nack();
         }
     }
+#endif
 
     delay(5);
 }

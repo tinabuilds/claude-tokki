@@ -5,6 +5,7 @@
 #include "logo.h"
 #include "clawd_still.h"
 #include "icons.h"
+#include "bambu_logo.h"
 #include "hal/board_caps.h"
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -244,8 +245,6 @@ static lv_obj_t* lbl_pr_line1;     // time left
 static lv_obj_t* lbl_pr_line2;     // layer + temps
 static lv_obj_t* lbl_pr_task;      // file name at the bottom
 static lv_obj_t* pr_dots[PRINTER_TRAYS];
-static lv_obj_t* pr_icon_head = nullptr;   // pixel printer's toolhead (slides while printing)
-static bool      pr_head_moving = false;
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -716,70 +715,14 @@ static void init_alert(void) {
 
 // ======== Printer Screen ========
 
-// Corner icon for the printer page: a small pixel-art printer in the same
-// chunky style as the corner Clawd. 16x12 cells of 5 px.
-static lv_obj_t* px_rect(lv_obj_t* parent, int cx, int cy, int cw, int ch, lv_color_t col) {
-    const int c = 5;
-    lv_obj_t* r = lv_obj_create(parent);
-    lv_obj_set_pos(r, cx * c, cy * c);
-    lv_obj_set_size(r, cw * c, ch * c);
-    lv_obj_set_style_bg_color(r, col, 0);
-    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(r, 0, 0);
-    lv_obj_set_style_radius(r, 0, 0);
-    lv_obj_set_style_pad_all(r, 0, 0);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_CLICKABLE);
-    return r;
-}
+// Corner icon for the printer page: the Bambu Lab mark, tinted Bambu lime.
+static lv_image_dsc_t bambu_logo_dsc;
 
 static void build_printer_icon(lv_obj_t* parent) {
-    lv_obj_t* box = lv_obj_create(parent);
-    lv_obj_set_size(box, 80, 60);
-    lv_obj_set_pos(box, L.margin, L.logo_y + (LOGO_HEIGHT - 60) / 2);
-    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_pad_all(box, 0, 0);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
-
-    px_rect(box, 0, 0, 16, 1, COL_BAMBU);    // top
-    px_rect(box, 0, 11, 16, 1, COL_BAMBU);   // base
-    px_rect(box, 0, 0, 1, 12, COL_BAMBU);    // sides
-    px_rect(box, 15, 0, 1, 12, COL_BAMBU);
-    px_rect(box, 1, 2, 14, 1, COL_DIM);      // gantry rail
-    px_rect(box, 2, 9, 12, 1, COL_DIM);      // bed
-    px_rect(box, 6, 7, 4, 2, COL_BAMBU);     // the part being printed
-
-    pr_icon_head = lv_obj_create(box);       // toolhead + nozzle, slides on the rail
-    lv_obj_set_size(pr_icon_head, 15, 25);
-    lv_obj_set_pos(pr_icon_head, 35, 10);
-    lv_obj_set_style_bg_opa(pr_icon_head, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(pr_icon_head, 0, 0);
-    lv_obj_set_style_pad_all(pr_icon_head, 0, 0);
-    lv_obj_clear_flag(pr_icon_head, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(pr_icon_head, LV_OBJ_FLAG_CLICKABLE);
-    px_rect(pr_icon_head, 0, 0, 3, 3, COL_TEXT);
-    px_rect(pr_icon_head, 1, 3, 1, 1, COL_TEXT);
-}
-
-static void head_x_cb(void* obj, int32_t v) { lv_obj_set_x((lv_obj_t*)obj, v); }
-
-static void printer_icon_animate(bool on) {
-    if (!pr_icon_head || on == pr_head_moving) return;
-    pr_head_moving = on;
-    lv_anim_delete(pr_icon_head, head_x_cb);
-    if (!on) { lv_obj_set_x(pr_icon_head, 35); return; }
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, pr_icon_head);
-    lv_anim_set_exec_cb(&a, head_x_cb);
-    lv_anim_set_values(&a, 15, 55);
-    lv_anim_set_duration(&a, 1400);
-    lv_anim_set_playback_duration(&a, 1400);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-    lv_anim_start(&a);
+    init_icon_dsc_rgb565a8(&bambu_logo_dsc, BAMBU_LOGO_W, BAMBU_LOGO_H, bambu_logo_data);
+    lv_obj_t* img = lv_image_create(parent);
+    lv_image_set_src(img, &bambu_logo_dsc);
+    lv_obj_set_pos(img, L.margin + 6, L.logo_y + (LOGO_HEIGHT - BAMBU_LOGO_H) / 2);
 }
 
 static void build_printer_screen(lv_obj_t* scr) {
@@ -910,8 +853,6 @@ void ui_update_printer(const PrinterState* ps) {
         printer_show_word("PRINTER", "Idle", buf2);   // temps under the word
     }
     lv_obj_align(lbl_pr_line2, LV_ALIGN_TOP_MID, 0, L.ring_cy + 68);
-
-    printer_icon_animate(ps->has_report && running);
 
     for (int i = 0; i < PRINTER_TRAYS; i++) {
         lv_obj_t* d = pr_dots[i];
@@ -1180,6 +1121,9 @@ static void apply_battery_visibility(void) {
 
 static void global_click_cb(lv_event_t* e) {
     (void)e;
+#ifdef PRINTER_ONLY
+    return;   // printer-only build: one page, taps don't switch away from it
+#endif
     if (current_screen == SCREEN_SPLASH)                         ui_show_screen(SCREEN_USAGE);
     else if (current_screen == SCREEN_USAGE && printer_container) ui_show_screen(SCREEN_PRINTER);
     else                                                          ui_show_screen(SCREEN_SPLASH);

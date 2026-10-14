@@ -1,5 +1,24 @@
 # Clawdmeter
 
+## `printer-only` branch: Bambu printer status screen
+
+This branch turns the board into a **printer-only status screen**: no Bluetooth, no Mac daemon, no Claude usage page. It boots straight into the printer page and stays there.
+
+- Ring shows print progress, time left, layer, nozzle / bed temps, AMS tray colours and the file name
+- When a print finishes or fails the ring flashes and it beeps
+- The board joins your Wi-Fi and reads the printer over **LAN MQTT** — no cloud, no computer in between. Built and tested on a **Bambu Lab P2S**; other Bambu printers with the same local MQTT should work but are untested. 2.4 GHz Wi-Fi only
+- Board: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. The 3D-printed mini-P2S stand it sits in is on MakerWorld
+
+Build and flash (PlatformIO):
+
+```bash
+pio run -d firmware -e waveshare_amoled_216_printer -t upload --upload-port /dev/cu.usbmodemXXXX
+```
+
+Then set it up once over USB (Wi-Fi + printer IP / serial / LAN access code), see **Printer page** below. The PWR button cycles screen brightness.
+
+Bambu Lab is a trademark of its owner; this project is not affiliated with Bambu Lab.
+
 ## About this fork: Claude Tokki
 
 A fork of [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by Hermann Björgvin. All credit for the original firmware, daemon and Clawd animations goes to him. Tested on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**.
@@ -14,6 +33,7 @@ Branches:
 
 - `claude-tokki`: the Claude usage changes only
 - `printer`: the above, plus a **Bambu Lab printer status page**
+- `printer-only`: the printer page on its own (build env `waveshare_amoled_216_printer`)
 
 ### Printer page (`printer` branch)
 

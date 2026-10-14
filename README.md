@@ -1,5 +1,23 @@
 # Clawdmeter
 
+## About this fork: Claude Tokki
+
+A fork of [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by Hermann Björgvin. All credit for the original firmware, daemon and Clawd animations goes to him. Tested on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**.
+
+What this fork changes:
+
+- **Ring gauge usage page** for the 480×480 screen: inner ring = 5-hour window, outer ring = weekly, big Tiempos digits in the middle
+- BLE device renamed to **Claude Tokki** (firmware + macOS daemon)
+- Simulator hook `SIM_START_USAGE=1` to boot straight into the usage page for headless screenshots
+
+Branches:
+
+- `claude-tokki`: the Claude usage changes only
+- `printer`: the above, plus a **Bambu Lab printer status page**
+
+Same licensing caveat as upstream applies (see below): proprietary fonts and Clawd assets, no license granted.
+
+
 > Also check out [Beam](https://github.com/notaharness/beam)! A CLI that lets you pair your machines using a passkey and [@Tailscale's tailcat](https://tailscale.com/blog/tailcat).
 
 <img src="assets/readme/waving.gif" width="120" align="right" alt="">

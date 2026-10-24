@@ -461,7 +461,7 @@ void loop() {
                     Serial.printf("mw: points %d -> %d\n", last_points, ms.points);
                     sound_hal_play_reset();
                 }
-                last_points = ms.points;
+                last_points = ms.has_points ? ms.points : -1;   // public mode has no points: don't chime on the switch
             }
         }
     }

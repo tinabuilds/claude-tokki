@@ -95,7 +95,7 @@ static void printer_task(void*) {
         if (!mqtt.connected()) {
             if (work.link != PRINTER_AUTH_FAILED) set_link(PRINTER_CONNECTING);
             char cid[24];
-            snprintf(cid, sizeof(cid), "tokki-%06lx", (unsigned long)(ESP.getEfuseMac() & 0xffffff));
+            snprintf(cid, sizeof(cid), "bambubu-%06lx", (unsigned long)(ESP.getEfuseMac() & 0xffffff));
             if (mqtt.connect(cid, "bblp", cfg.code.c_str())) {
                 String topic = "device/" + cfg.sn + "/report";
                 mqtt.subscribe(topic.c_str());

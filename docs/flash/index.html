@@ -54,6 +54,7 @@
   .need { margin: 10px 0 0; padding-left: 20px; }
   .need li { margin: 8px 0; color: var(--dim); font-size: 15px; }
   .need b { color: var(--text); }
+  code { font-size: 13px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; }
   .need a { color: var(--text); }
   footer { color: var(--dim); font-size: 13px; text-align: center; margin-top: 28px; }
   footer a { color: inherit; }
@@ -82,7 +83,13 @@
 
   <section>
     <h2><span class="n">1</span>Install the firmware</h2>
-    <p class="hint">Plug the board into this computer, click Install, and pick the port that appears (often "USB JTAG/serial debug unit"). Takes about a minute.</p>
+    <ol class="need">
+      <li>Plug the screen into this computer and click <b>Install</b>.</li>
+      <li>Chrome lists ports. Pick <b>USB JTAG/serial debug unit</b> (on a Mac it ends in <code>cu.usbmodem…</code>, on Windows in <code>COM…</code>) and click <b>Connect</b>.</li>
+      <li>See only things like <code>Bluetooth-Incoming-Port</code>, <code>debug-console</code> or a speaker? Those are your computer's own ports: click Cancel. The computer can't see the screen, almost always because the cable only charges. Try another cable, plugged straight into the computer.</li>
+      <li>If it asks whether to <b>erase the device</b>: first install, either is fine; reinstalling, leave it unticked to keep your settings.</li>
+      <li>Takes about a minute. When it says it's done, close the box and keep the screen plugged in for step 2.</li>
+    </ol>
     <esp-web-install-button manifest="manifest.json">
       <button slot="activate">Install</button>
       <span slot="unsupported"></span>
@@ -92,7 +99,7 @@
 
   <section>
     <h2><span class="n">2</span>Connect your printer</h2>
-    <p class="hint">The screen reads your P2S over your home Wi-Fi (2.4 GHz only). The printer's IP address, access code and serial number are all on the printer's own touchscreen, under its settings.</p>
+    <p class="hint">The screen reads your printer over your home Wi-Fi (2.4 GHz only). The printer's IP address, access code and serial number are all on the printer's own touchscreen, under its settings. When you click Save, Chrome asks for the port again: pick the same <b>USB JTAG/serial debug unit</b>.</p>
     <div class="row">
       <div><label for="ssid">Wi-Fi name</label><input id="ssid" type="text" autocomplete="off"></div>
       <div><label for="pass">Wi-Fi password</label><input id="pass" type="password" autocomplete="off"></div>
@@ -108,7 +115,7 @@
 
   <section>
     <h2><span class="n">3</span>Add MakerWorld <small style="font-weight:400;color:var(--dim)">optional</small></h2>
-    <p class="hint">Adds your MakerWorld stats to the screen: under the print ring while printing, front and centre with your avatar when the printer is idle. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for.</p>
+    <p class="hint">Adds your MakerWorld stats to the screen: under the print ring while printing, front and centre with your avatar when the printer is idle. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for. If Chrome asks for the port, it's the same <b>USB JTAG/serial debug unit</b>; use the newest code if you've requested more than one.</p>
     <div class="choice">
       <label><input type="radio" name="mode" value="points" checked>
         <div><b>Points and comments</b><span>Adds points, boosts received, and an envelope for new comments and replies. The screen keeps a sign-in token for 90 days, then asks you to sign in again.</span></div></label>

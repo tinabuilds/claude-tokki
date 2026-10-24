@@ -1,21 +1,25 @@
 # Clawdmeter
 
-## `printer-only` branch: Bambu printer status screen
+## `printer-only` branch: Bambubu, a Bambu printer + MakerWorld screen
 
-This branch turns the board into a **printer-only status screen**: no Bluetooth, no Mac daemon, no Claude usage page. It boots straight into the printer page and stays there.
+This branch turns the board into **Bambubu**: a desk screen for your Bambu printer and your MakerWorld stats. No Bluetooth, no Mac daemon, no Claude usage page.
 
-- Ring shows print progress, time left, layer, nozzle / bed temps, AMS tray colours and the file name
-- When a print finishes or fails the ring flashes and it beeps
-- The board joins your Wi-Fi and reads the printer over **LAN MQTT** — no cloud, no computer in between. Built and tested on a **Bambu Lab P2S**; other Bambu printers with the same local MQTT should work but are untested. 2.4 GHz Wi-Fi only
+**Set it up from your browser, no coding: https://tinabuilds.dev/bambubu** (Chrome or Edge on a computer). One click installs the firmware, then you fill in Wi-Fi and printer details, and optionally sign in to MakerWorld with an emailed code.
+
+- **Printing**: a ring with percent, layer and file name inside, time left on top, AMS tray colours under it. When a print finishes or fails the ring flashes and it beeps; the result stays up for 15 minutes
+- **MakerWorld**: followers, points and boosts received in lime along the bottom. When the printer is idle the ring frames your points and your avatar and name sit on top. An envelope in the corner counts unread comments and replies, and chimes when a new one lands. Numbers count up when they change; 1000+ reads 5.2K
+- Two MakerWorld modes: **Points and comments** (the board keeps a Bambu sign-in token for 90 days) or **Public numbers** (keeps only your user ID; followers, likes, downloads). Sign-in uses Bambu's email code, so Google and Apple accounts work and no password is ever asked for
+- **Always on** while on USB: tap to fade to black, tap again to wake. The page drifts 3 px every 2 minutes against AMOLED burn-in
+- The printer is read over **LAN MQTT** (no cloud, no computer in between); MakerWorld numbers come from Bambu's app API every 5 minutes. Built and tested on a **Bambu Lab P2S**; other Bambu printers with the same local MQTT should work but are untested. 2.4 GHz Wi-Fi only
 - Board: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. The 3D-printed mini-P2S stand it sits in is on MakerWorld
 
-Build and flash (PlatformIO):
+Build and flash yourself (PlatformIO) if you'd rather not use the web installer:
 
 ```bash
 pio run -d firmware -e waveshare_amoled_216_printer -t upload --upload-port /dev/cu.usbmodemXXXX
 ```
 
-Then set it up once over USB (Wi-Fi + printer IP / serial / LAN access code), see **Printer page** below. The PWR button cycles screen brightness.
+Serial setup commands, if you skip the web page: `printer {"ssid":…,"pass":…,"ip":…,"sn":…,"code":…}`, then `mw {"email":…}` and `mw {"code":…,"points":true}`. The web page (`docs/flash/`) sends exactly these.
 
 Bambu Lab is a trademark of its owner; this project is not affiliated with Bambu Lab.
 

@@ -2,11 +2,13 @@
 #include "data.h"
 #include "ble.h"
 #include "printer.h"
+#include "makerworld.h"
 
 enum screen_t {
     SCREEN_SPLASH,
     SCREEN_USAGE,
     SCREEN_PRINTER,
+    SCREEN_MAKERWORLD,
     SCREEN_COUNT,
 };
 
@@ -26,3 +28,7 @@ void ui_hide_alert(void);
 // pulses the ring — called when a print finishes or fails.
 void ui_update_printer(const PrinterState* ps);
 void ui_printer_event(void);
+// MakerWorld page (creator stats). Joins the tap rotation once signed in;
+// ui_makerworld_event() jumps to it when a new comment lands.
+void ui_update_makerworld(const MakerWorldState* ms);
+void ui_makerworld_event(void);

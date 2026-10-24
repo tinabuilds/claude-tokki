@@ -245,6 +245,16 @@ static lv_obj_t* lbl_pr_line1;     // time left
 static lv_obj_t* lbl_pr_line2;     // layer + temps
 static lv_obj_t* lbl_pr_task;      // file name at the bottom
 static lv_obj_t* pr_dots[PRINTER_TRAYS];
+
+// MakerWorld page
+static lv_obj_t* mw_container = nullptr;
+static lv_obj_t* lbl_mw_caption;
+static lv_obj_t* lbl_mw_big;       // points, or followers in public mode
+static lv_obj_t* lbl_mw_word;      // "Sign in again" / "Loading" instead of the number
+static lv_obj_t* lbl_mw_line1;
+static lv_obj_t* lbl_mw_line2;
+static lv_obj_t* lbl_mw_comments;  // "2 new comments", lime, only when > 0
+static bool      mw_enabled = false;   // signed in: the page joins the tap rotation
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -886,6 +896,91 @@ void ui_printer_event(void) {
     lv_anim_start(&a);
 }
 
+static void build_makerworld_screen(lv_obj_t* scr) {
+    mw_container = lv_obj_create(scr);
+    lv_obj_set_size(mw_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(mw_container, 0, 0);
+    lv_obj_set_style_bg_opa(mw_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mw_container, 0, 0);
+    lv_obj_set_style_pad_all(mw_container, 0, 0);
+    lv_obj_clear_flag(mw_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(mw_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lbl_mw_caption = make_ring_label(mw_container, &font_styrene_20, COL_BAMBU);
+    lv_obj_set_style_text_letter_space(lbl_mw_caption, 3, 0);
+    lbl_mw_big  = make_ring_label(mw_container, &font_tiempos_120, COL_TEXT);
+    lbl_mw_word = make_ring_label(mw_container, &font_tiempos_34, COL_TEXT);
+    lbl_mw_line1 = make_ring_label(mw_container, &font_styrene_24, COL_DIM);
+    lbl_mw_line2 = make_ring_label(mw_container, &font_styrene_20, COL_DIM);
+    lbl_mw_comments = make_ring_label(mw_container, &font_styrene_24, COL_BAMBU);
+
+    // MakerWorld is Bambu's: same corner mark (descriptor set up by build_printer_icon)
+    lv_obj_t* img = lv_image_create(mw_container);
+    lv_image_set_src(img, &bambu_logo_dsc);
+    lv_obj_set_pos(img, L.margin + 6, L.logo_y + (LOGO_HEIGHT - BAMBU_LOGO_H) / 2);
+
+    lv_obj_add_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void mw_show_word(const char* word, const char* line1) {
+    lv_obj_add_flag(lbl_mw_big, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_mw_word, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lbl_mw_word, word);
+    lv_obj_align(lbl_mw_word, LV_ALIGN_TOP_MID, 0, L.ring_cy - 40);
+    lv_label_set_text(lbl_mw_line1, line1);
+    lv_obj_align(lbl_mw_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 28);
+    lv_label_set_text(lbl_mw_line2, "");
+    lv_label_set_text(lbl_mw_comments, "");
+}
+
+void ui_update_makerworld(const MakerWorldState* ms) {
+    mw_enabled = ms->link != MW_OFF;
+    if (!mw_container) return;
+    char buf[64];
+
+    lv_label_set_text(lbl_mw_caption, ms->has_points ? "MAKERWORLD POINTS" : "MAKERWORLD");
+    lv_obj_align(lbl_mw_caption, LV_ALIGN_TOP_MID, 0, L.ring_cy - 112);
+
+    if (ms->link == MW_EXPIRED) {
+        mw_show_word("Sign in again", "login expired");
+        return;
+    }
+    if (!ms->has_data) {
+        mw_show_word("Loading", "reading MakerWorld");
+        return;
+    }
+
+    lv_obj_add_flag(lbl_mw_word, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_mw_big, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text_fmt(lbl_mw_big, "%d", ms->has_points ? ms->points : ms->fans);
+    lv_obj_align(lbl_mw_big, LV_ALIGN_TOP_MID, 0, L.ring_cy - 76);
+
+    if (ms->has_points) {
+        snprintf(buf, sizeof(buf), "%d follower%s", ms->fans, ms->fans == 1 ? "" : "s");
+        lv_label_set_text(lbl_mw_line1, buf);
+        snprintf(buf, sizeof(buf), "%d boost token%s", ms->boost_tokens, ms->boost_tokens == 1 ? "" : "s");
+    } else {
+        lv_label_set_text(lbl_mw_line1, ms->fans == 1 ? "follower" : "followers");
+        snprintf(buf, sizeof(buf), "%d likes  /  %d downloads", ms->likes, ms->downloads);
+    }
+    lv_obj_align(lbl_mw_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 40);
+    lv_label_set_text(lbl_mw_line2, buf);
+    lv_obj_align(lbl_mw_line2, LV_ALIGN_TOP_MID, 0, L.ring_cy + 78);
+
+    if (ms->new_comments > 0) {
+        snprintf(buf, sizeof(buf), "%d new comment%s", ms->new_comments, ms->new_comments == 1 ? "" : "s");
+        lv_label_set_text(lbl_mw_comments, buf);
+    } else {
+        lv_label_set_text(lbl_mw_comments, "");
+    }
+    lv_obj_align(lbl_mw_comments, LV_ALIGN_BOTTOM_MID, 0, -40);
+}
+
+void ui_makerworld_event(void) {
+    ui_hide_alert();
+    ui_show_screen(SCREEN_MAKERWORLD);
+}
+
 // ======== Public API ========
 
 void ui_init(void) {
@@ -904,6 +999,7 @@ void ui_init(void) {
 
     init_usage_screen(scr);
     if (L.ring) build_printer_screen(scr);
+    if (L.ring) build_makerworld_screen(scr);
     splash_init(scr);
 
     if (splash_get_root()) {
@@ -1122,16 +1218,21 @@ static void apply_battery_visibility(void) {
 static void global_click_cb(lv_event_t* e) {
     (void)e;
 #ifdef PRINTER_ONLY
-    return;   // printer-only build: one page, taps don't switch away from it
+    // printer-only build: taps flip printer <-> MakerWorld once signed in, else do nothing
+    if (mw_enabled && mw_container)
+        ui_show_screen(current_screen == SCREEN_MAKERWORLD ? SCREEN_PRINTER : SCREEN_MAKERWORLD);
+    return;
 #endif
     if (current_screen == SCREEN_SPLASH)                         ui_show_screen(SCREEN_USAGE);
     else if (current_screen == SCREEN_USAGE && printer_container) ui_show_screen(SCREEN_PRINTER);
+    else if (current_screen == SCREEN_PRINTER && mw_enabled && mw_container) ui_show_screen(SCREEN_MAKERWORLD);
     else                                                          ui_show_screen(SCREEN_SPLASH);
 }
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
     if (printer_container) lv_obj_add_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
+    if (mw_container) lv_obj_add_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
 
     switch (screen) {
@@ -1142,6 +1243,14 @@ void ui_show_screen(screen_t screen) {
             lv_obj_clear_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
         } else {
             screen = SCREEN_USAGE;   // board without the printer page
+            lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        break;
+    case SCREEN_MAKERWORLD:
+        if (mw_container) {
+            lv_obj_clear_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            screen = SCREEN_USAGE;
             lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
         }
         break;

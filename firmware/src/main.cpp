@@ -182,6 +182,9 @@ static void check_serial_cmd() {
             else if (strncmp(cmd_buf, "printer ", 8) == 0) {
                 if (!printer_config_cmd(cmd_buf + 8)) Serial.println("printer: bad config");
             }
+            else if (strncmp(cmd_buf, "mw ", 3) == 0) {
+                if (!makerworld_cmd(cmd_buf + 3)) Serial.println("mw: bad command");
+            }
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -238,6 +241,7 @@ void setup() {
 #endif
     input_hal_init();
     printer_init();
+    makerworld_init();
 
     ui_init();
 #ifdef PRINTER_ONLY
@@ -251,6 +255,7 @@ void setup() {
 #ifdef BOARD_SIM
     if (getenv("SIM_START_USAGE")) ui_show_screen(SCREEN_USAGE);   // headless shots of the usage view
     if (getenv("SIM_START_PRINTER")) ui_show_screen(SCREEN_PRINTER);
+    if (getenv("SIM_START_MW")) ui_show_screen(SCREEN_MAKERWORLD);
 #endif
 
 #ifdef PRINTER_ONLY
@@ -430,6 +435,25 @@ void loop() {
                 sound_hal_play_reset();
             }
             strcpy(last_state, ps.gcode_state);
+        }
+    }
+
+    // MakerWorld page: feed the UI, and jump to it with a chime when the
+    // unread-comment count goes up (other notification types never alert).
+    {
+        static MakerWorldState ms;
+        static int last_comments = -1;   // -1 = no fetch yet: don't alert on boot
+        if (makerworld_get(&ms)) {
+            ui_update_makerworld(&ms);
+            if (ms.has_data) {
+                if (last_comments >= 0 && ms.new_comments > last_comments) {
+                    Serial.printf("mw: %d new comment(s)\n", ms.new_comments);
+                    idle_note_activity();
+                    ui_makerworld_event();
+                    sound_hal_play_reset();
+                }
+                last_comments = ms.new_comments;
+            }
         }
     }
 

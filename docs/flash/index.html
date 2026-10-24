@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tokki Printer Setup</title>
+<meta name="description" content="Install and set up the Mini P2S live print status screen from your browser — no coding.">
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --text: #1c1c1a; --dim: #6b6a64; --line: #e3e1da;
+    --accent: #6a9a00; --accent-ink: #ffffff; --ok: #2f7d32; --bad: #b3261e; --field: #fbfaf7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111110; --card: #1b1b19; --text: #f0efe9; --dim: #a09f97; --line: #2e2e2a;
+      --accent: #c6e83c; --accent-ink: #111110; --ok: #7fd17f; --bad: #ff8a80; --field: #151513;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .lede { color: var(--dim); margin: 0 0 28px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+            padding: 22px 22px 24px; margin-bottom: 16px; }
+  h2 { font-size: 18px; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; }
+  .n { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: none;
+       border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 14px; font-weight: 700; }
+  .hint { color: var(--dim); font-size: 14px; margin: 4px 0 16px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+  label small { font-weight: 400; color: var(--dim); }
+  input[type=text], input[type=password], input[type=email] {
+    width: 100%; padding: 10px 12px; font: inherit; color: var(--text); background: var(--field);
+    border: 1px solid var(--line); border-radius: 9px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+  button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 9px; cursor: pointer;
+           border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); margin-top: 18px; }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  .choice { display: grid; gap: 10px; margin-top: 14px; }
+  .choice label { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 12px 14px;
+                  border: 1px solid var(--line); border-radius: 10px; font-weight: 400; cursor: pointer; }
+  .choice input { margin-top: 4px; accent-color: var(--accent); }
+  .choice b { display: block; }
+  .choice span { color: var(--dim); font-size: 14px; }
+  .status { margin-top: 14px; font-size: 14px; min-height: 1.4em; }
+  .status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
+  .warn { display: none; border-color: var(--bad); }
+  esp-web-install-button button { margin-top: 0; }
+  footer { color: var(--dim); font-size: 13px; text-align: center; margin-top: 28px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tokki Printer Screen</h1>
+  <p class="lede">Install the firmware and set up your screen from this page. You need Chrome or Edge on a computer and a USB-C data cable.</p>
+
+  <section class="warn" id="nosupport">
+    <h2>This browser can't talk to USB devices</h2>
+    <p class="hint">Open this page in Chrome or Edge on a Mac, Windows or Linux computer. Safari, Firefox and phones don't support it.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">1</span>Install the firmware</h2>
+    <p class="hint">Plug the board into this computer, click Install, and pick the port that appears (often "USB JTAG/serial debug unit"). Takes about a minute.</p>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate">Install</button>
+      <span slot="unsupported"></span>
+      <span slot="not-allowed">Open this page over https to install.</span>
+    </esp-web-install-button>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Connect your printer</h2>
+    <p class="hint">The screen reads your P2S over your home Wi-Fi (2.4 GHz only). The printer's IP address, access code and serial number are all on the printer's own touchscreen, under its settings.</p>
+    <div class="row">
+      <div><label for="ssid">Wi-Fi name</label><input id="ssid" type="text" autocomplete="off"></div>
+      <div><label for="pass">Wi-Fi password</label><input id="pass" type="password" autocomplete="off"></div>
+    </div>
+    <div class="row">
+      <div><label for="ip">Printer IP address <small>e.g. 192.168.1.40</small></label><input id="ip" type="text" autocomplete="off" inputmode="decimal"></div>
+      <div><label for="code">Access code <small>8 characters</small></label><input id="code" type="text" autocomplete="off"></div>
+    </div>
+    <label for="sn">Printer serial number</label><input id="sn" type="text" autocomplete="off">
+    <button id="sendPrinter">Save to screen</button>
+    <div class="status" id="printerStatus"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Add MakerWorld <small style="font-weight:400;color:var(--dim)">optional</small></h2>
+    <p class="hint">Adds a second page: tap the screen to flip between your printer and your MakerWorld stats. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for.</p>
+    <div class="choice">
+      <label><input type="radio" name="mode" value="public" checked>
+        <div><b>Public numbers</b><span>Followers, likes and downloads. The screen keeps only your user ID.</span></div></label>
+      <label><input type="radio" name="mode" value="points">
+        <div><b>Points and comments</b><span>Adds points, boost tokens and new comments. The screen keeps a sign-in token for 90 days, then asks you to sign in again.</span></div></label>
+    </div>
+    <label for="email">Bambu account email</label><input id="email" type="email" autocomplete="email">
+    <button id="sendEmail">Email me a code</button>
+    <div id="codeStep" hidden>
+      <label for="mwcode">Code from the email</label><input id="mwcode" type="text" autocomplete="one-time-code" inputmode="numeric">
+      <button id="sendCode">Sign in</button>
+    </div>
+    <div class="status" id="mwStatus"></div>
+    <button class="ghost" id="signOut">Remove MakerWorld from the screen</button>
+  </section>
+
+  <footer>Open source: <a href="https://github.com/tinabuilds/claude-tokki/tree/printer-only">tinabuilds/claude-tokki</a>. Settings stay on your screen; this page has no server.</footer>
+</main>
+
+<script>
+  if (!("serial" in navigator)) document.getElementById("nosupport").style.display = "block";
+
+  const $ = (id) => document.getElementById(id);
+  let port = null, writer = null, listeners = [];
+
+  // One serial connection shared by both setup sections. Lines the board prints
+  // ("printer: ...", "mw: ...") go to whichever section is listening.
+  async function connect() {
+    if (port) return;
+    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    readLoop();
+  }
+
+  async function readLoop() {
+    const reader = port.readable.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value;
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (line) listeners.forEach((fn) => fn(line));
+        }
+      }
+    } catch (e) {
+      setStatus("printerStatus", "The screen was unplugged. Plug it back in and try again.", "bad");
+    }
+    port = null;
+  }
+
+  async function send(cmd, payload) {
+    await connect();
+    await writer.write(new TextEncoder().encode(cmd + " " + JSON.stringify(payload) + "\n"));
+  }
+
+  function setStatus(id, text, kind) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = "status" + (kind ? " " + kind : "");
+  }
+
+  // Wait for the first board line that matches one of `outcomes` (prefix → [message, kind]).
+  function await_reply(id, outcomes, timeoutMs, timeoutMsg) {
+    return new Promise((resolve) => {
+      const done = (msg, kind) => { listeners = listeners.filter((f) => f !== fn); clearTimeout(t); setStatus(id, msg, kind); resolve(kind); };
+      const fn = (line) => { for (const [p, [msg, kind]] of Object.entries(outcomes)) if (line.startsWith(p)) return done(msg, kind); };
+      const t = setTimeout(() => done(timeoutMsg || "No answer from the screen. Is it the Tokki firmware from step 1?", "bad"), timeoutMs);
+      listeners.push(fn);
+    });
+  }
+
+  async function guarded(id, btn, fn) {
+    btn.disabled = true;
+    try { await fn(); }
+    catch (e) { setStatus(id, e.name === "NotFoundError" ? "No port picked." : "Couldn't open the screen's port. Close other apps using it (like the Arduino serial monitor) and try again.", "bad"); }
+    finally { btn.disabled = false; }
+  }
+
+  $("sendPrinter").onclick = () => guarded("printerStatus", $("sendPrinter"), async () => {
+    const v = (id) => $(id).value.trim();
+    const cfg = { ssid: v("ssid"), pass: $("pass").value, ip: v("ip"), sn: v("sn").toUpperCase(), code: v("code") };
+    if (!cfg.ssid || !cfg.ip || !cfg.sn || !cfg.code) return setStatus("printerStatus", "Fill in every field (the Wi-Fi password can be empty for open networks).", "bad");
+    setStatus("printerStatus", "Saving, then connecting to the printer…");
+    const reply = await_reply("printerStatus", {
+      "printer: connected": ["Connected. The screen now shows your printer.", "ok"],
+      "printer: mqtt connect failed rc=4": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
+      "printer: mqtt connect failed rc=5": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
+      "printer: bad config": ["The screen didn't accept the settings. Try again.", "bad"],
+    }, 40000, "Saved, but the screen can't reach the printer yet. Check the Wi-Fi name and password (2.4 GHz) and the printer's IP address.");
+    await send("printer", cfg);
+    await reply;
+  });
+
+  $("sendEmail").onclick = () => guarded("mwStatus", $("sendEmail"), async () => {
+    const email = $("email").value.trim();
+    if (!email.includes("@")) return setStatus("mwStatus", "Enter the email on your Bambu account.", "bad");
+    setStatus("mwStatus", "Asking Bambu to email you a code…");
+    const reply = await_reply("mwStatus", {
+      "mw: code sent": ["Code sent. Check your inbox (and spam).", "ok"],
+      "mw: code request failed": ["Bambu didn't send a code. Check the email address.", "bad"],
+      "mw: waiting for Wi-Fi": ["The screen isn't on Wi-Fi yet. Finish step 2 first.", "bad"],
+    }, 30000);
+    await send("mw", { email });
+    if (await reply === "ok") { $("codeStep").hidden = false; $("mwcode").focus(); }
+  });
+
+  $("sendCode").onclick = () => guarded("mwStatus", $("sendCode"), async () => {
+    const code = $("mwcode").value.trim();
+    if (!code) return setStatus("mwStatus", "Enter the code from the email.", "bad");
+    const points = document.querySelector("input[name=mode]:checked").value === "points";
+    setStatus("mwStatus", "Signing in…");
+    const reply = await_reply("mwStatus", {
+      "mw: signed in": ["Signed in. Tap the screen to see your MakerWorld page.", "ok"],
+      "mw: sign-in failed": ["That code didn't work. Codes expire after a few minutes; request a new one.", "bad"],
+      "mw: signed in but": ["Signed in, but MakerWorld didn't answer. Try again in a minute.", "bad"],
+      "mw: send the email first": ["Request a code first.", "bad"],
+    }, 30000);
+    await send("mw", { code, points });
+    await reply;
+  });
+
+  $("signOut").onclick = () => guarded("mwStatus", $("signOut"), async () => {
+    const reply = await_reply("mwStatus", { "mw: signed out": ["Removed. Nothing from your account is left on the screen.", "ok"] }, 10000);
+    await send("mw", { off: true });
+    await reply;
+  });
+</script>
+</body>
+</html>

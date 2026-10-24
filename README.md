@@ -1,10 +1,10 @@
 # Clawdmeter
 
-## `printer-only` branch: Bambubu, a Bambu printer + MakerWorld screen
+## `printer-only` branch: Bambooboo, a Bambu printer + MakerWorld screen
 
-This branch turns the board into **Bambubu**: a desk screen for your Bambu printer and your MakerWorld stats. No Bluetooth, no Mac daemon, no Claude usage page.
+This branch turns the board into **Bambooboo**: a desk screen for your Bambu printer and your MakerWorld stats. No Bluetooth, no Mac daemon, no Claude usage page.
 
-**Set it up from your browser, no coding: https://tinabuilds.dev/bambubu** (Chrome or Edge on a computer). One click installs the firmware, then you fill in Wi-Fi and printer details, and optionally sign in to MakerWorld with an emailed code.
+**Set it up from your browser, no coding: https://tinabuilds.dev/bambooboo** (Chrome or Edge on a computer). One click installs the firmware, then you fill in Wi-Fi and printer details, and optionally sign in to MakerWorld with an emailed code.
 
 - **Printing**: a ring with percent, layer and file name inside, time left on top, AMS tray colours under it. When a print finishes or fails the ring flashes and it beeps; the result stays up for 15 minutes
 - **MakerWorld**: followers, points and boosts received in lime along the bottom. When the printer is idle the ring frames your points and your avatar and name sit on top. An envelope in the corner counts unread comments and replies, and chimes when a new one lands. Numbers count up when they change; 1000+ reads 5.2K

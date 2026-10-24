@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bambubu Setup</title>
+<title>Bambooboo Setup</title>
 <meta name="description" content="Install and set up the Mini P2S live print status screen from your browser — no coding.">
 <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
 <style>
@@ -55,15 +55,18 @@
   .need li { margin: 8px 0; color: var(--dim); font-size: 15px; }
   .need b { color: var(--text); }
   code { font-size: 13px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; }
-  .need a { color: var(--text); }
+  .need a, .lede a { color: var(--text); }
+  .replug { border: 2px solid var(--accent); border-radius: 14px; padding: 14px 18px; margin: 0 0 16px;
+            background: color-mix(in srgb, var(--accent) 12%, var(--card)); font-size: 15px; }
+  .replug b { display: block; font-size: 17px; margin-bottom: 2px; }
   footer { color: var(--dim); font-size: 13px; text-align: center; margin-top: 28px; }
   footer a { color: inherit; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Bambubu</h1>
-  <p class="lede">A desk screen for your Bambu printer and your MakerWorld stats. Install and set it up right here, no coding.</p>
+  <h1>Bambooboo</h1>
+  <p class="lede">A desk screen for your Bambu printer and your MakerWorld stats. Install and set it up right here, no coding. Rather build it yourself? The source is on <a href="https://github.com/tinabuilds/claude-tokki/tree/printer-only" target="_blank" rel="noopener">GitHub</a>.</p>
 
   <section>
     <h2>What you need</h2>
@@ -97,12 +100,17 @@
     </esp-web-install-button>
   </section>
 
+  <div class="replug">
+    <b>Before step 2: unplug the screen and plug it back in.</b>
+    The installer keeps hold of the screen after step 1. Without a replug, step 2 can't reach it.
+  </div>
+
   <section>
     <h2><span class="n">2</span>Connect your printer</h2>
     <p class="hint">The screen reads your printer over your home Wi-Fi (2.4 GHz only). The printer's IP address, access code and serial number are all on the printer's own touchscreen, under its settings. When you click Save, Chrome asks for the port again: pick the same <b>USB JTAG/serial debug unit</b>.</p>
     <div class="row">
       <div><label for="ssid">Wi-Fi name</label><input id="ssid" type="text" autocomplete="off"></div>
-      <div><label for="pass">Wi-Fi password</label><input id="pass" type="password" autocomplete="off"></div>
+      <div><label for="pass">Wi-Fi password <small>stays on the screen, never sent anywhere</small></label><input id="pass" type="password" autocomplete="off"></div>
     </div>
     <div class="row">
       <div><label for="ip">Printer IP address <small>e.g. 192.168.1.40</small></label><input id="ip" type="text" autocomplete="off" inputmode="decimal"></div>
@@ -114,7 +122,7 @@
   </section>
 
   <section>
-    <h2><span class="n">3</span>Add MakerWorld <small style="font-weight:400;color:var(--dim)">optional</small></h2>
+    <h2><span class="n">3</span>Add MakerWorld <small style="font-weight:400;color:var(--dim)">optional: skip it for a printer-only screen</small></h2>
     <p class="hint">Adds your MakerWorld stats to the screen: under the print ring while printing, front and centre with your avatar when the printer is idle. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for. If Chrome asks for the port, it's the same <b>USB JTAG/serial debug unit</b>; use the newest code if you've requested more than one.</p>
     <div class="choice">
       <label><input type="radio" name="mode" value="points" checked>
@@ -217,7 +225,7 @@
       const cancel = () => done(null, "cancelled");
       waiters.push(cancel);
       const fn = (line) => { for (const [p, [msg, kind]] of Object.entries(outcomes)) if (line.startsWith(p)) return done(msg, kind); };
-      const t = setTimeout(() => done(timeoutMsg || "No answer from the screen. Is it the Bambubu firmware from step 1?", "bad"), timeoutMs);
+      const t = setTimeout(() => done(timeoutMsg || "No answer from the screen. Is it the Bambooboo firmware from step 1?", "bad"), timeoutMs);
       listeners.push(fn);
     });
   }
@@ -240,7 +248,8 @@
     if (!cfg.ssid || !cfg.ip || !cfg.sn || !cfg.code) return setStatus("printerStatus", "Fill in every field (the Wi-Fi password can be empty for open networks).", "bad");
     setStatus("printerStatus", "Saving, then connecting to the printer…");
     const reply = await_reply("printerStatus", {
-      "printer: connected": ["Connected. The screen now shows your printer.", "ok"],
+      "printer: connected but no data": ["The printer accepted the access code but sends nothing: the serial number is probably wrong. Check it and save again.", "bad"],
+      "printer: receiving status": ["Connected. The screen now shows your printer.", "ok"],
       "printer: mqtt connect failed rc=4": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
       "printer: mqtt connect failed rc=5": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
       "printer: bad config": ["The screen didn't accept the settings. Try again.", "bad"],

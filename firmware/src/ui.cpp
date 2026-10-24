@@ -868,6 +868,9 @@ static void render_printer_page(void) {
         lv_arc_set_value(arc_print, 0);
         lv_obj_set_style_arc_color(arc_print, COL_RED, LV_PART_INDICATOR);
         printer_show_word("PRINTER", "Code rejected", "check access code");
+    } else if (ps->link == PRINTER_NO_DATA) {
+        lv_arc_set_value(arc_print, 0);
+        printer_show_word("PRINTER", "No data", "check serial number");
     } else if (!ps->has_report) {
         lv_arc_set_value(arc_print, 0);
         printer_show_word("PRINTER", "Connecting", ps->link == PRINTER_WIFI ? "joining Wi-Fi" : "finding printer");
@@ -1082,8 +1085,10 @@ static void set_ring_geometry(bool combo) {
     }
 
     // file name: wide strip at the bottom (classic) or inside the ring (combo)
-    lv_obj_set_style_text_font(lbl_pr_task, combo ? &font_styrene_16 : &font_styrene_20, 0);
+    const lv_font_t* task_font = combo ? &font_styrene_16 : &font_styrene_20;
+    lv_obj_set_style_text_font(lbl_pr_task, task_font, 0);
     lv_obj_set_width(lbl_pr_task, combo ? d - 2 * w - 40 : L.content_w - 40);
+    lv_obj_set_height(lbl_pr_task, lv_font_get_line_height(task_font));   // one line: long names end in "..."
     lv_obj_set_style_text_font(lbl_pr_pct, combo ? &font_tiempos_84 : &font_tiempos_120, 0);
 
     lv_obj_t* classic_only[] = {lbl_pr_pct_sym, lbl_pr_line1};
@@ -1208,6 +1213,7 @@ static void render_combo(void) {
         lv_color_t st_col = COL_TEXT;
         if (ps->link == PRINTER_UNCONFIGURED)     { snprintf(buf, sizeof(buf), "Printer not set up"); st_col = COL_DIM; }
         else if (ps->link == PRINTER_AUTH_FAILED) { snprintf(buf, sizeof(buf), "Check access code"); st_col = COL_RED; }
+        else if (ps->link == PRINTER_NO_DATA)     { snprintf(buf, sizeof(buf), "Check serial number"); st_col = COL_RED; }
         else if (!ps->has_report)                 { snprintf(buf, sizeof(buf), "Connecting"); st_col = COL_DIM; }
         else if (failed)                          { snprintf(buf, sizeof(buf), "Check the printer"); st_col = COL_RED; }
         else if (finished)                        { snprintf(buf, sizeof(buf), "Ready to collect"); st_col = COL_BAMBU; }
@@ -1288,7 +1294,8 @@ static void render_combo(void) {
         lv_label_set_text(lbl_pr_caption, "PRINTER");
         lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, CB_CY - 52);
         lv_obj_set_style_text_font(lbl_pr_word, &font_tiempos_56, 0);
-        lv_label_set_text(lbl_pr_word, ps->link == PRINTER_AUTH_FAILED ? "Code?" : !ps->has_report ? "..." : "Idle");
+        lv_label_set_text(lbl_pr_word, ps->link == PRINTER_AUTH_FAILED ? "Code?" : ps->link == PRINTER_NO_DATA ? "No data"
+                                     : !ps->has_report ? "..." : "Idle");
         lv_obj_align(lbl_pr_word, LV_ALIGN_TOP_MID, 0, CB_CY - 22);
     }
 
@@ -1383,6 +1390,7 @@ void ui_init(void) {
     lv_obj_t* scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);   // the burn-in drift pushes pages a few px off-screen; no scrollbar for that
 
 #ifndef BOARD_HAS_PSRAM
     // Static corner mascot (see clawd_still.h) — the animated one needs PSRAM.

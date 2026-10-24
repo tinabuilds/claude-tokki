@@ -56,7 +56,11 @@ static void on_message(char* topic, byte* payload, unsigned int len) {
     uint32_t now = millis();
     if (work.has_report && now - last_parse_ms < PARSE_EVERY_MS) return;
     last_parse_ms = now;
-    if (printer_parse_report((const char*)payload, len, &work)) publish_state();
+    bool first = !work.has_report;
+    if (printer_parse_report((const char*)payload, len, &work)) {
+        if (first && work.has_report) task_log("printer: receiving status");   // setup page waits for this
+        publish_state();
+    }
 }
 
 static void printer_task(void*) {
@@ -71,6 +75,7 @@ static void printer_task(void*) {
     Cfg cfg;
     bool have_cfg = false;
     uint32_t backoff_ms = 2000;
+    uint32_t connected_at = 0;
 
     for (;;) {
         if (reconfig || !have_cfg) {
@@ -95,13 +100,14 @@ static void printer_task(void*) {
         if (!mqtt.connected()) {
             if (work.link != PRINTER_AUTH_FAILED) set_link(PRINTER_CONNECTING);
             char cid[24];
-            snprintf(cid, sizeof(cid), "bambubu-%06lx", (unsigned long)(ESP.getEfuseMac() & 0xffffff));
+            snprintf(cid, sizeof(cid), "bambooboo-%06lx", (unsigned long)(ESP.getEfuseMac() & 0xffffff));
             if (mqtt.connect(cid, "bblp", cfg.code.c_str())) {
                 String topic = "device/" + cfg.sn + "/report";
                 mqtt.subscribe(topic.c_str());
                 String req = "device/" + cfg.sn + "/request";
                 mqtt.publish(req.c_str(), "{\"pushing\":{\"sequence_id\":\"0\",\"command\":\"pushall\"}}");
                 task_log("printer: connected");
+                connected_at = millis();
                 set_link(PRINTER_ONLINE);
                 backoff_ms = 2000;
             } else {
@@ -118,6 +124,11 @@ static void printer_task(void*) {
         }
 
         mqtt.loop();
+        // Connected, yet no report after 20 s: the printer only publishes on its own serial's topic
+        if (work.link == PRINTER_ONLINE && !work.has_report && millis() - connected_at > 20000) {
+            task_log("printer: connected but no data - check the serial number");
+            set_link(PRINTER_NO_DATA);
+        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

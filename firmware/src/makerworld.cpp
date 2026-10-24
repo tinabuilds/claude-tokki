@@ -61,7 +61,7 @@ static int api(const char* path, const char* body, String* out) {
     HTTPClient http;
     http.setTimeout(12000);
     if (!http.begin(net, String(API) + path)) return -1;
-    http.setUserAgent("Bambubu/1.1");   // the default "ESP32HTTPClient" gets a Cloudflare 403
+    http.setUserAgent("Bambooboo/1.1");   // the default "ESP32HTTPClient" gets a Cloudflare 403
     http.addHeader("Content-Type", "application/json");
     if (token.length()) http.addHeader("Authorization", "Bearer " + token);
     int code = body ? http.POST(String(body)) : http.GET();
@@ -156,7 +156,7 @@ static bool fetch_avatar() {
     net.setCACert(BAMBU_API_ROOT_CA);   // same DigiCert root as the API
     HTTPClient http;
     http.setTimeout(12000);
-    http.setUserAgent("Bambubu/1.1");
+    http.setUserAgent("Bambooboo/1.1");
     String url = avatar_url + "?x-oss-process=image/resize,w_44,h_44/format,png";
     if (!http.begin(net, url)) { task_log("mw: avatar url rejected"); return false; }
     int st = http.GET();

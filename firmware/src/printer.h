@@ -12,6 +12,7 @@ enum printer_link_t {
     PRINTER_CONNECTING,         // Wi-Fi up, opening MQTT
     PRINTER_ONLINE,             // reports flowing
     PRINTER_AUTH_FAILED,        // printer rejected the access code
+    PRINTER_NO_DATA,            // connected but nothing arrives: usually a wrong serial number (wrong topic)
 };
 
 #define PRINTER_TRAYS 4

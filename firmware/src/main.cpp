@@ -6,6 +6,7 @@
 
 #include "data.h"
 #include "ui.h"
+#include "task_log.h"
 #include "ble.h"
 #include "splash.h"
 #include "usage_rate.h"
@@ -240,6 +241,7 @@ void setup() {
     ble_init();
 #endif
     input_hal_init();
+    task_log_init();
     printer_init();
     makerworld_init();
 
@@ -417,6 +419,7 @@ void loop() {
     }
 
     check_serial_cmd();
+    task_log_drain();
 
     // Printer page: feed the UI, and jump to it when a print ends.
     {

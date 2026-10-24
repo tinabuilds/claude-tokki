@@ -1,5 +1,6 @@
 #include "printer.h"
 #include <Arduino.h>
+#include "task_log.h"
 
 #if __has_include(<PubSubClient.h>)
 #include <WiFi.h>
@@ -100,12 +101,12 @@ static void printer_task(void*) {
                 mqtt.subscribe(topic.c_str());
                 String req = "device/" + cfg.sn + "/request";
                 mqtt.publish(req.c_str(), "{\"pushing\":{\"sequence_id\":\"0\",\"command\":\"pushall\"}}");
-                Serial.println("printer: connected");
+                task_log("printer: connected");
                 set_link(PRINTER_ONLINE);
                 backoff_ms = 2000;
             } else {
                 int rc = mqtt.state();
-                Serial.printf("printer: mqtt connect failed rc=%d (internal free %u, largest %u)\n", rc,
+                task_log("printer: mqtt connect failed rc=%d (internal free %u, largest %u)", rc,
                               (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
                 // 4 = bad credentials, 5 = not authorized → wrong access code
@@ -159,7 +160,7 @@ bool printer_config_cmd(const char* json) {
     p.end();
     reconfig = true;
     // Never echo secrets back over serial
-    Serial.printf("printer: config saved (ssid=%s ip=%s)\n",
+    task_log("printer: config saved (ssid=%s ip=%s)",
                   doc["ssid"] | "-", doc["ip"] | "-");
     return true;
 }

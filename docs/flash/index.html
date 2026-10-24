@@ -86,19 +86,19 @@
       <div><label for="ip">Printer IP address <small>e.g. 192.168.1.40</small></label><input id="ip" type="text" autocomplete="off" inputmode="decimal"></div>
       <div><label for="code">Access code <small>8 characters</small></label><input id="code" type="text" autocomplete="off"></div>
     </div>
-    <label for="sn">Printer serial number</label><input id="sn" type="text" autocomplete="off">
+    <label for="sn">Printer serial number <small>15 characters. Also in Bambu Handy (Settings → Firmware Version) or Bambu Studio (Device → Update)</small></label><input id="sn" type="text" autocomplete="off">
     <button id="sendPrinter">Save to screen</button>
     <div class="status" id="printerStatus"></div>
   </section>
 
   <section>
     <h2><span class="n">3</span>Add MakerWorld <small style="font-weight:400;color:var(--dim)">optional</small></h2>
-    <p class="hint">Adds a second page: tap the screen to flip between your printer and your MakerWorld stats. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for.</p>
+    <p class="hint">Adds your MakerWorld stats to the screen: under the print ring while printing, front and centre with your avatar when the printer is idle. Sign in with the email on your Bambu account; Google and Apple sign-ins work too, since Bambu emails you a code. Your password is never asked for.</p>
     <div class="choice">
       <label><input type="radio" name="mode" value="public" checked>
         <div><b>Public numbers</b><span>Followers, likes and downloads. The screen keeps only your user ID.</span></div></label>
       <label><input type="radio" name="mode" value="points">
-        <div><b>Points and comments</b><span>Adds points, boost tokens and new comments. The screen keeps a sign-in token for 90 days, then asks you to sign in again.</span></div></label>
+        <div><b>Points and comments</b><span>Adds points, boosts received, and an envelope for new comments and replies. The screen keeps a sign-in token for 90 days, then asks you to sign in again.</span></div></label>
     </div>
     <label for="email">Bambu account email</label><input id="email" type="email" autocomplete="email">
     <button id="sendEmail">Email me a code</button>
@@ -212,7 +212,7 @@
     const points = document.querySelector("input[name=mode]:checked").value === "points";
     setStatus("mwStatus", "Signing in…");
     const reply = await_reply("mwStatus", {
-      "mw: signed in": ["Signed in. Tap the screen to see your MakerWorld page.", "ok"],
+      "mw: signed in": ["Signed in. Your stats appear on the screen within a few seconds.", "ok"],
       "mw: sign-in failed": ["That code didn't work. Codes expire after a few minutes; request a new one.", "bad"],
       "mw: signed in but": ["Signed in, but MakerWorld didn't answer. Try again in a minute.", "bad"],
       "mw: send the email first": ["Request a code first.", "bad"],

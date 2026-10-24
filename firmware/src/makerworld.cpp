@@ -1,5 +1,6 @@
 #include "makerworld.h"
 #include <Arduino.h>
+#include "task_log.h"
 
 #if __has_include(<HTTPClient.h>)
 #include <WiFi.h>
@@ -79,8 +80,8 @@ static void send_code() {
     token = "";   // the code request must go out unauthenticated
     int st = api("/v1/user-service/user/sendemail/code", body.c_str(), nullptr);
     token = saved;
-    if (st == 200) Serial.println("mw: code sent");
-    else           Serial.printf("mw: code request failed (%d)\n", st);
+    if (st == 200) task_log("mw: code sent");
+    else           task_log("mw: code request failed (%d)", st);
 }
 
 static void login() {
@@ -93,7 +94,7 @@ static void login() {
     int st = api("/v1/user-service/user/login", body.c_str(), &resp);
     JsonDocument r;
     if (st != 200 || deserializeJson(r, resp) || !r["accessToken"].is<const char*>()) {
-        Serial.printf("mw: sign-in failed (%d) - check the code\n", st);
+        task_log("mw: sign-in failed (%d) - check the code", st);
         load_cfg();   // keep whatever account was there before
         return;
     }
@@ -105,7 +106,7 @@ static void login() {
     st = api("/v1/user-service/my/profile", nullptr, &resp);
     JsonDocument prof;
     if (st != 200 || deserializeJson(prof, resp, DeserializationOption::Filter(filter)) || !prof["uid"]) {
-        Serial.printf("mw: signed in but profile failed (%d)\n", st);
+        task_log("mw: signed in but profile failed (%d)", st);
         load_cfg();
         return;
     }
@@ -124,7 +125,7 @@ static void login() {
     work.has_points = token.length() > 0;
     work.link = MW_WAITING;
     publish_state();
-    Serial.printf("mw: signed in (%s mode)\n", work.has_points ? "points" : "public");
+    task_log("mw: signed in (%s mode)", work.has_points ? "points" : "public");
 }
 
 static void forget() {
@@ -136,7 +137,7 @@ static void forget() {
     avatar_loaded = "";
     work = {};
     publish_state();
-    Serial.println("mw: signed out");
+    task_log("mw: signed out");
 }
 
 static void mark_expired() {
@@ -144,7 +145,7 @@ static void mark_expired() {
     p.begin("mw", false);
     p.putBool("expired", true);
     p.end();
-    Serial.println("mw: token rejected - sign in again");
+    task_log("mw: token rejected - sign in again");
     set_link(MW_EXPIRED);
 }
 
@@ -157,7 +158,7 @@ static bool fetch_avatar() {
     http.setTimeout(12000);
     http.setUserAgent("ClaudeTokki/1.1");
     String url = avatar_url + "?x-oss-process=image/resize,w_44,h_44/format,png";
-    if (!http.begin(net, url)) { Serial.println("mw: avatar url rejected"); return false; }
+    if (!http.begin(net, url)) { task_log("mw: avatar url rejected"); return false; }
     int st = http.GET();
     int len = http.getSize();
     const char* why = nullptr;
@@ -178,7 +179,7 @@ static bool fetch_avatar() {
     }
     free(png);
     http.end();
-    if (why) Serial.printf("mw: avatar download failed (%s, status %d, size %d)\n", why, st, len);
+    if (why) task_log("mw: avatar download failed (%s, status %d, size %d)", why, st, len);
     return !why;
 }
 
@@ -199,7 +200,7 @@ static bool fetch() {
         if (st == 401) { mark_expired(); return false; }
         JsonDocument d;
         if (st != 200 || deserializeJson(d, resp, DeserializationOption::Filter(filter))) {
-            Serial.printf("mw: profile fetch failed (%d)\n", st);
+            task_log("mw: profile fetch failed (%d)", st);
             return false;
         }
         next.fans = d["fanCount"] | 0;
@@ -222,7 +223,7 @@ static bool fetch() {
         int st = api(("/v1/user-service/user/profile/" + uid).c_str(), nullptr, &resp);
         JsonDocument d;
         if (st != 200 || deserializeJson(d, resp, DeserializationOption::Filter(filter))) {
-            Serial.printf("mw: public profile fetch failed (%d)\n", st);
+            task_log("mw: public profile fetch failed (%d)", st);
             return false;
         }
         next.fans = d["fanCount"] | 0;
@@ -256,7 +257,7 @@ static void mw_task(void*) {
         if (WiFi.status() != WL_CONNECTED) {
             if (want_code || want_login) {   // drop it: the setup page asks again once Wi-Fi is up
                 want_code = want_login = false;
-                Serial.println("mw: waiting for Wi-Fi (set up the printer page first)");
+                task_log("mw: waiting for Wi-Fi (set up the printer page first)");
             }
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
@@ -301,7 +302,7 @@ bool makerworld_cmd(const char* json) {
         return true;
     }
     if (doc["code"].is<const char*>()) {
-        if (!pending_email[0]) { Serial.println("mw: send the email first"); return true; }
+        if (!pending_email[0]) { task_log("mw: send the email first"); return true; }
         strlcpy(pending_code, doc["code"], sizeof(pending_code));
         want_points = doc["points"] | false;
         want_login = true;

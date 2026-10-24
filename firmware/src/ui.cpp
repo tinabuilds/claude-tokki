@@ -758,6 +758,7 @@ static void build_printer_icon(lv_obj_t* parent) {
 }
 
 static void build_mw_widgets(lv_obj_t* parent);
+static void swipe_tap_cb(lv_event_t* e);   // printer-only tap handler
 
 static void build_printer_screen(lv_obj_t* scr) {
     printer_container = lv_obj_create(scr);
@@ -768,6 +769,10 @@ static void build_printer_screen(lv_obj_t* scr) {
     lv_obj_set_style_pad_all(printer_container, 0, 0);
     lv_obj_clear_flag(printer_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(printer_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+#ifdef PRINTER_ONLY
+    lv_obj_add_event_cb(printer_container, swipe_tap_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(printer_container, swipe_tap_cb, LV_EVENT_RELEASED, NULL);
+#endif
 
     arc_print = make_ring_arc(printer_container, L.ring_d - 24, 28);
 
@@ -1144,7 +1149,15 @@ static void render_combo(void) {
     bool paused   = !strcmp(gs, "PAUSE");
     bool finished = !strcmp(gs, "FINISH");
     bool failed   = !strcmp(gs, "FAILED");
-    bool active   = ps->has_report && (running || paused || finished || failed);
+    // A printer sits in FINISH/FAILED until the next print starts; show the
+    // result for a while, then hand the page back to the MakerWorld card.
+    static uint32_t ended_at = 0;
+    static bool was_ended = false;
+    bool ended = finished || failed;
+    if (ended && !was_ended) ended_at = lv_tick_get();
+    was_ended = ended;
+    bool result_fresh = ended && lv_tick_get() - ended_at < 15UL * 60UL * 1000UL;
+    bool active   = ps->has_report && (running || paused || result_fresh);
     bool ok       = ms->has_data && ms->link != MW_EXPIRED;
     // Printer idle and MakerWorld numbers in hand: the page becomes a MakerWorld card
     bool idle_card = !active && ps->has_report && ok;
@@ -1228,7 +1241,7 @@ static void render_combo(void) {
     }
 
     // ---- ring
-    int pct = finished ? 100 : (active ? ps->pct : 0);
+    int pct = !active ? 0 : finished ? 100 : ps->pct;
     lv_color_t col = failed ? COL_RED : paused ? COL_DIM : COL_BAMBU;
     lv_arc_set_value(arc_print, pct);
     lv_obj_set_style_arc_color(arc_print, col, LV_PART_INDICATOR);
@@ -1243,8 +1256,9 @@ static void render_combo(void) {
                                           : !strcmp(gs, "PREPARE") ? "PREPARING" : "PRINTING");
         lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, CB_CY - 74);
         lv_obj_set_style_text_color(lbl_pr_pct, COL_TEXT, 0);
-        lv_obj_set_style_text_font(lbl_pr_pct, &font_tiempos_84, 0);
-        lv_label_set_text_fmt(lbl_pr_pct, "%d%%", pct);
+        snprintf(buf, sizeof(buf), "%d%%", pct);
+        static const lv_font_t* const pct_fonts[] = {&font_tiempos_84, &font_tiempos_56};
+        fit_number(lbl_pr_pct, buf, inner - 10, pct_fonts, 2);   // "100%" steps down a size
         lv_obj_align(lbl_pr_pct, LV_ALIGN_TOP_MID, 0, CB_CY - 50);
         if (ps->total_layer > 0) {
             snprintf(buf, sizeof(buf), "Layer %d / %d", ps->layer, ps->total_layer);
@@ -1607,11 +1621,23 @@ static void apply_battery_visibility(void) {
     else                                  lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
 }
 
+// Printer-only build: a tap fades the always-on panel to black (the next tap
+// wakes it, see idle.cpp). Drags are ignored.
+static lv_point_t press_at;
+static void swipe_tap_cb(lv_event_t* e) {
+    lv_indev_t* in = lv_indev_active();
+    if (!in) return;
+    lv_point_t p;
+    lv_indev_get_point(in, &p);
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED) { press_at = p; return; }
+    int dx = p.x - press_at.x, dy = p.y - press_at.y;
+    if (abs(dx) < 20 && abs(dy) < 20) idle_sleep_now();
+}
+
 static void global_click_cb(lv_event_t* e) {
     (void)e;
 #ifdef PRINTER_ONLY
-    idle_sleep_now();   // printer-only build: one always-on page; a tap blacks it out, the next tap wakes it
-    return;
+    return;   // taps are swipe_tap_cb's in this build
 #endif
     if (current_screen == SCREEN_SPLASH)                         ui_show_screen(SCREEN_USAGE);
     else if (current_screen == SCREEN_USAGE && printer_container) ui_show_screen(SCREEN_PRINTER);

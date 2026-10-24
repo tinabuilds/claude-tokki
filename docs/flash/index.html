@@ -51,6 +51,10 @@
   .status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
   .warn { display: none; border-color: var(--bad); }
   esp-web-install-button button { margin-top: 0; }
+  .need { margin: 10px 0 0; padding-left: 20px; }
+  .need li { margin: 8px 0; color: var(--dim); font-size: 15px; }
+  .need b { color: var(--text); }
+  .need a { color: var(--text); }
   footer { color: var(--dim); font-size: 13px; text-align: center; margin-top: 28px; }
   footer a { color: inherit; }
 </style>
@@ -58,7 +62,18 @@
 <body>
 <main>
   <h1>Bambubu</h1>
-  <p class="lede">Install the firmware and set up your screen from this page. You need Chrome or Edge on a computer and a USB-C data cable.</p>
+  <p class="lede">A desk screen for your Bambu printer and your MakerWorld stats. Install and set it up right here, no coding.</p>
+
+  <section>
+    <h2>What you need</h2>
+    <ul class="need">
+      <li><b>The screen:</b> <a href="https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm" target="_blank" rel="noopener">Waveshare ESP32-S3-Touch-AMOLED-2.16</a>. It has to be exactly this board; the firmware won't run on others.</li>
+      <li><b>A USB-C cable that carries data</b>, not a charge-only one. If no port shows up in step 1, try another cable.</li>
+      <li><b>A computer with Chrome or Edge</b> (Mac or Windows). Plug the screen into the computer, not the printer; no drivers needed.</li>
+      <li><b>Your printer on the same 2.4 GHz Wi-Fi</b> as the screen. They talk over your home network; there's no cable between them. Tested on a P2S.</li>
+      <li>Optional: a case. The mini P2S stand is on MakerWorld.</li>
+    </ul>
+  </section>
 
   <section class="warn" id="nosupport">
     <h2>This browser can't talk to USB devices</h2>
@@ -108,6 +123,18 @@
     </div>
     <div class="status" id="mwStatus"></div>
     <button class="ghost" id="signOut">Remove MakerWorld from the screen</button>
+  </section>
+
+  <section>
+    <h2>Privacy</h2>
+    <ul class="need">
+      <li><b>Nothing you enter reaches me.</b> This page has no server and no form submission. What you type goes from your browser straight to your screen over the USB cable.</li>
+      <li><b>Your screen talks to only two places:</b> your printer, on your home network, and Bambu Lab's own servers (api.bambulab.com and its image server) for your MakerWorld numbers and avatar. Nothing goes to me or anyone else.</li>
+      <li><b>Your Bambu password is never asked for.</b> MakerWorld sign-in uses the code Bambu emails you.</li>
+      <li><b>Stored on the screen itself:</b> your Wi-Fi name and password and the printer's IP, serial number and access code; in Points mode a Bambu sign-in token that expires after 90 days, in Public mode only your MakerWorld user ID. Like most DIY gadgets it isn't encrypted, so before you give the screen away, press "Remove MakerWorld from the screen" and reinstall with "Erase device" ticked.</li>
+      <li><b>Loading this page:</b> the installer code comes from unpkg.com and the site runs on Cloudflare, so they see an ordinary web request (such as your IP address). I add no cookies or trackers.</li>
+      <li>Unofficial project, not affiliated with Bambu Lab. It reads the same app API Bambu's own apps use, so it may stop working if Bambu changes it.</li>
+    </ul>
   </section>
 
   <footer>Open source: <a href="https://github.com/tinabuilds/claude-tokki/tree/printer-only">tinabuilds/claude-tokki</a>. Settings stay on your screen; this page has no server.</footer>

@@ -88,7 +88,7 @@
       <li>Chrome lists ports. Pick <b>USB JTAG/serial debug unit</b> (on a Mac it ends in <code>cu.usbmodem…</code>, on Windows in <code>COM…</code>) and click <b>Connect</b>.</li>
       <li>See only things like <code>Bluetooth-Incoming-Port</code>, <code>debug-console</code> or a speaker? Those are your computer's own ports: click Cancel. The computer can't see the screen, almost always because the cable only charges. Try another cable, plugged straight into the computer.</li>
       <li>If it asks whether to <b>erase the device</b>: first install, either is fine; reinstalling, leave it unticked to keep your settings.</li>
-      <li>Takes about a minute. When it says it's done, close the box and keep the screen plugged in for step 2.</li>
+      <li>Takes about a minute. When it says it's done, close the install window, then <b>unplug the screen and plug it back in</b> (the installer keeps hold of it until you do). Leave it plugged into the computer for step 2.</li>
     </ol>
     <esp-web-install-button manifest="manifest.json">
       <button slot="activate">Install</button>
@@ -156,9 +156,17 @@
   // One serial connection shared by both setup sections. Lines the board prints
   // ("printer: ...", "mw: ...") go to whichever section is listening.
   async function connect() {
-    if (port) return;
-    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
-    await port.open({ baudRate: 115200 });
+    if (port && writer) return;
+    const p = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+    try {
+      await p.open({ baudRate: 115200 });
+    } catch (e) {
+      // Usually the step-1 installer still holding the port (it also keeps the board in reset)
+      const busy = new Error("busy");
+      busy.name = "PortBusy";
+      throw busy;
+    }
+    port = p;
     writer = port.writable.getWriter();
     readLoop();
   }
@@ -175,7 +183,7 @@
         while ((i = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, i).trim();
           buf = buf.slice(i + 1);
-          if (line) listeners.forEach((fn) => fn(line));
+          if (line) listeners.slice().forEach((fn) => fn(line));
         }
       }
     } catch (e) {
@@ -196,9 +204,18 @@
   }
 
   // Wait for the first board line that matches one of `outcomes` (prefix → [message, kind]).
+  let waiters = [];   // pending await_reply calls, dropped if sending fails
   function await_reply(id, outcomes, timeoutMs, timeoutMsg) {
     return new Promise((resolve) => {
-      const done = (msg, kind) => { listeners = listeners.filter((f) => f !== fn); clearTimeout(t); setStatus(id, msg, kind); resolve(kind); };
+      const done = (msg, kind) => {
+        listeners = listeners.filter((f) => f !== fn);
+        waiters = waiters.filter((w) => w !== cancel);
+        clearTimeout(t);
+        if (msg !== null) setStatus(id, msg, kind);
+        resolve(kind);
+      };
+      const cancel = () => done(null, "cancelled");
+      waiters.push(cancel);
       const fn = (line) => { for (const [p, [msg, kind]] of Object.entries(outcomes)) if (line.startsWith(p)) return done(msg, kind); };
       const t = setTimeout(() => done(timeoutMsg || "No answer from the screen. Is it the Bambubu firmware from step 1?", "bad"), timeoutMs);
       listeners.push(fn);
@@ -208,7 +225,12 @@
   async function guarded(id, btn, fn) {
     btn.disabled = true;
     try { await fn(); }
-    catch (e) { setStatus(id, e.name === "NotFoundError" ? "No port picked." : "Couldn't open the screen's port. Close other apps using it (like the Arduino serial monitor) and try again.", "bad"); }
+    catch (e) {
+      waiters.slice().forEach((c) => c());
+      setStatus(id, e.name === "NotFoundError" ? "No port picked."
+        : e.name === "PortBusy" ? "The screen's port is busy, usually still held by the installer from step 1. Unplug the screen, plug it back in, reload this page, then skip straight to this step."
+        : "Couldn't talk to the screen. Unplug it, plug it back in, reload this page and try again.", "bad");
+    }
     finally { btn.disabled = false; }
   }
 
@@ -222,7 +244,7 @@
       "printer: mqtt connect failed rc=4": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
       "printer: mqtt connect failed rc=5": ["The printer rejected the access code. Check it on the printer's screen.", "bad"],
       "printer: bad config": ["The screen didn't accept the settings. Try again.", "bad"],
-    }, 40000, "Saved, but the screen can't reach the printer yet. Check the Wi-Fi name and password (2.4 GHz) and the printer's IP address.");
+    }, 90000, "Saved. The screen is still connecting: look at it. If it still says Connecting after a minute, check the Wi-Fi name and password (2.4 GHz only) and the printer's IP address.");
     await send("printer", cfg);
     await reply;
   });

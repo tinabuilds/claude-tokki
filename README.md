@@ -11,7 +11,7 @@ This branch turns the board into **Bambubu**: a desk screen for your Bambu print
 - Two MakerWorld modes: **Points and comments** (the board keeps a Bambu sign-in token for 90 days) or **Public numbers** (keeps only your user ID; followers, likes, downloads). Sign-in uses Bambu's email code, so Google and Apple accounts work and no password is ever asked for
 - **Always on** while on USB: tap to fade to black, tap again to wake. The page drifts 3 px every 2 minutes against AMOLED burn-in
 - The printer is read over **LAN MQTT** (no cloud, no computer in between); MakerWorld numbers come from Bambu's app API every 5 minutes. Built and tested on a **Bambu Lab P2S**; other Bambu printers with the same local MQTT should work but are untested. 2.4 GHz Wi-Fi only
-- Board: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. The 3D-printed mini-P2S stand it sits in is on MakerWorld
+- Board: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. The 3D-printed [mini-P2S stand](https://makerworld.com/en/models/3439884-mini-p2s-live-print-status-screen-for-bambu-lab) it sits in is on MakerWorld
 
 Build and flash yourself (PlatformIO) if you'd rather not use the web installer:
 

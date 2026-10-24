@@ -1,4 +1,7 @@
+#include <math.h>
+#include <stdlib.h>
 #include "ui.h"
+#include "idle.h"
 #include "splash.h"
 #include <lvgl.h>
 #include <time.h>
@@ -10,6 +13,7 @@
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
 LV_FONT_DECLARE(font_tiempos_120);
+LV_FONT_DECLARE(font_tiempos_84);
 LV_FONT_DECLARE(font_tiempos_56);
 LV_FONT_DECLARE(font_tiempos_34);
 LV_FONT_DECLARE(font_styrene_48);
@@ -246,15 +250,33 @@ static lv_obj_t* lbl_pr_line2;     // layer + temps
 static lv_obj_t* lbl_pr_task;      // file name at the bottom
 static lv_obj_t* pr_dots[PRINTER_TRAYS];
 
-// MakerWorld page
-static lv_obj_t* mw_container = nullptr;
-static lv_obj_t* lbl_mw_caption;
-static lv_obj_t* lbl_mw_big;       // points, or followers in public mode
-static lv_obj_t* lbl_mw_word;      // "Sign in again" / "Loading" instead of the number
-static lv_obj_t* lbl_mw_line1;
-static lv_obj_t* lbl_mw_line2;
-static lv_obj_t* lbl_mw_comments;  // "2 new comments", lime, only when > 0
-static bool      mw_enabled = false;   // signed in: the page joins the tap rotation
+// MakerWorld, folded into the printer page. Once signed in the page switches
+// to a combined layout: a smaller print ring (percent, layer and file name
+// inside it), print status in the title slot, three lime stats along the
+// bottom, and an envelope in the top-right corner for unread comments + replies.
+#define CB_STATS 3
+static lv_obj_t* lbl_cb_status;    // title slot: "1h 46m left" / "Printer idle" / ...
+static lv_obj_t* lbl_cb_num[CB_STATS];   // points / followers / boosts (followers / likes / downloads in public mode)
+static lv_obj_t* lbl_cb_cap[CB_STATS];
+static lv_obj_t* cb_small_ring[2];   // idle view: rings around the two corner stats
+static lv_obj_t* cb_avatar_wrap;     // idle view: round avatar + name in the title slot
+static lv_obj_t* cb_avatar_img;
+static lv_obj_t* lbl_cb_name;
+static lv_image_dsc_t cb_avatar_dsc;
+static uint32_t  cb_avatar_seq = 0;
+
+// Count-up: each stat eases from its old value to a new one instead of jumping
+enum { ST_POINTS, ST_FANS, ST_BOOSTS, ST_LIKES, ST_DOWNLOADS, ST_COUNT };
+static int st_target[ST_COUNT] = {-1, -1, -1, -1, -1};
+static int st_shown[ST_COUNT];
+static lv_obj_t* mw_mail;          // envelope outline
+static lv_obj_t* mw_mail_flap;     // the "V" across it
+static lv_obj_t* mw_badge;         // unread count bubble
+static lv_obj_t* lbl_mw_badge;
+static lv_point_precise_t mw_flap_pts[3];
+static PrinterState    pr_last = {};
+static MakerWorldState mw_last = {};
+static bool      mw_enabled = false;   // signed in: the printer page uses the combined layout
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -735,6 +757,8 @@ static void build_printer_icon(lv_obj_t* parent) {
     lv_obj_set_pos(img, L.margin + 6, L.logo_y + (LOGO_HEIGHT - BAMBU_LOGO_H) / 2);
 }
 
+static void build_mw_widgets(lv_obj_t* parent);
+
 static void build_printer_screen(lv_obj_t* scr) {
     printer_container = lv_obj_create(scr);
     lv_obj_set_size(printer_container, L.scr_w, L.scr_h);
@@ -777,6 +801,7 @@ static void build_printer_screen(lv_obj_t* scr) {
     }
 
     build_printer_icon(printer_container);
+    build_mw_widgets(printer_container);
 
     lbl_pr_task = make_ring_label(printer_container, &font_styrene_20, COL_DIM);
     lv_label_set_long_mode(lbl_pr_task, LV_LABEL_LONG_DOT);
@@ -809,8 +834,16 @@ static void printer_show_word(const char* caption, const char* word, const char*
     lv_obj_align(lbl_pr_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 28);
 }
 
-void ui_update_printer(const PrinterState* ps) {
+static void render_combo(void);
+static void mw_render_mail(void);
+static void set_ring_geometry(bool combo);
+
+static void render_printer_page(void) {
     if (!printer_container) return;
+    mw_render_mail();
+    if (mw_enabled) { render_combo(); return; }
+    set_ring_geometry(false);
+    const PrinterState* ps = &pr_last;
     char buf[64], buf2[64];
     const char* gs = ps->gcode_state;
     bool running  = !strcmp(gs, "RUNNING") || !strcmp(gs, "PREPARE");
@@ -818,6 +851,7 @@ void ui_update_printer(const PrinterState* ps) {
     bool finished = !strcmp(gs, "FINISH");
     bool failed   = !strcmp(gs, "FAILED");
 
+    lv_obj_align(lbl_pr_task, LV_ALIGN_BOTTOM_MID, 0, -22);
     snprintf(buf2, sizeof(buf2), "Nozzle %dC   Bed %dC", ps->nozzle, ps->bed);
     lv_label_set_text(lbl_pr_line2, "");
     lv_label_set_text(lbl_pr_task, "");
@@ -896,89 +930,435 @@ void ui_printer_event(void) {
     lv_anim_start(&a);
 }
 
-static void build_makerworld_screen(lv_obj_t* scr) {
-    mw_container = lv_obj_create(scr);
-    lv_obj_set_size(mw_container, L.scr_w, L.scr_h);
-    lv_obj_set_pos(mw_container, 0, 0);
-    lv_obj_set_style_bg_opa(mw_container, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(mw_container, 0, 0);
-    lv_obj_set_style_pad_all(mw_container, 0, 0);
-    lv_obj_clear_flag(mw_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(mw_container, global_click_cb, LV_EVENT_CLICKED, NULL);
-
-    lbl_mw_caption = make_ring_label(mw_container, &font_styrene_20, COL_BAMBU);
-    lv_obj_set_style_text_letter_space(lbl_mw_caption, 3, 0);
-    lbl_mw_big  = make_ring_label(mw_container, &font_tiempos_120, COL_TEXT);
-    lbl_mw_word = make_ring_label(mw_container, &font_tiempos_34, COL_TEXT);
-    lbl_mw_line1 = make_ring_label(mw_container, &font_styrene_24, COL_DIM);
-    lbl_mw_line2 = make_ring_label(mw_container, &font_styrene_20, COL_DIM);
-    lbl_mw_comments = make_ring_label(mw_container, &font_styrene_24, COL_BAMBU);
-
-    // MakerWorld is Bambu's: same corner mark (descriptor set up by build_printer_icon)
-    lv_obj_t* img = lv_image_create(mw_container);
-    lv_image_set_src(img, &bambu_logo_dsc);
-    lv_obj_set_pos(img, L.margin + 6, L.logo_y + (LOGO_HEIGHT - BAMBU_LOGO_H) / 2);
-
-    lv_obj_add_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void mw_show_word(const char* word, const char* line1) {
-    lv_obj_add_flag(lbl_mw_big, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(lbl_mw_word, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(lbl_mw_word, word);
-    lv_obj_align(lbl_mw_word, LV_ALIGN_TOP_MID, 0, L.ring_cy - 40);
-    lv_label_set_text(lbl_mw_line1, line1);
-    lv_obj_align(lbl_mw_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 28);
-    lv_label_set_text(lbl_mw_line2, "");
-    lv_label_set_text(lbl_mw_comments, "");
+void ui_update_printer(const PrinterState* ps) {
+    pr_last = *ps;
+    render_printer_page();
 }
 
 void ui_update_makerworld(const MakerWorldState* ms) {
+    mw_last = *ms;
     mw_enabled = ms->link != MW_OFF;
-    if (!mw_container) return;
-    char buf[64];
-
-    lv_label_set_text(lbl_mw_caption, ms->has_points ? "MAKERWORLD POINTS" : "MAKERWORLD");
-    lv_obj_align(lbl_mw_caption, LV_ALIGN_TOP_MID, 0, L.ring_cy - 112);
-
-    if (ms->link == MW_EXPIRED) {
-        mw_show_word("Sign in again", "login expired");
-        return;
-    }
-    if (!ms->has_data) {
-        mw_show_word("Loading", "reading MakerWorld");
-        return;
-    }
-
-    lv_obj_add_flag(lbl_mw_word, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(lbl_mw_big, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text_fmt(lbl_mw_big, "%d", ms->has_points ? ms->points : ms->fans);
-    lv_obj_align(lbl_mw_big, LV_ALIGN_TOP_MID, 0, L.ring_cy - 76);
-
-    if (ms->has_points) {
-        snprintf(buf, sizeof(buf), "%d follower%s", ms->fans, ms->fans == 1 ? "" : "s");
-        lv_label_set_text(lbl_mw_line1, buf);
-        snprintf(buf, sizeof(buf), "%d boost token%s", ms->boost_tokens, ms->boost_tokens == 1 ? "" : "s");
-    } else {
-        lv_label_set_text(lbl_mw_line1, ms->fans == 1 ? "follower" : "followers");
-        snprintf(buf, sizeof(buf), "%d likes  /  %d downloads", ms->likes, ms->downloads);
-    }
-    lv_obj_align(lbl_mw_line1, LV_ALIGN_TOP_MID, 0, L.ring_cy + 40);
-    lv_label_set_text(lbl_mw_line2, buf);
-    lv_obj_align(lbl_mw_line2, LV_ALIGN_TOP_MID, 0, L.ring_cy + 78);
-
-    if (ms->new_comments > 0) {
-        snprintf(buf, sizeof(buf), "%d new comment%s", ms->new_comments, ms->new_comments == 1 ? "" : "s");
-        lv_label_set_text(lbl_mw_comments, buf);
-    } else {
-        lv_label_set_text(lbl_mw_comments, "");
-    }
-    lv_obj_align(lbl_mw_comments, LV_ALIGN_BOTTOM_MID, 0, -40);
+    render_printer_page();
+    if (current_screen == SCREEN_PRINTER) ui_show_screen(SCREEN_PRINTER);   // re-apply title visibility
 }
 
 void ui_makerworld_event(void) {
     ui_hide_alert();
-    ui_show_screen(SCREEN_MAKERWORLD);
+    ui_show_screen(SCREEN_PRINTER);
+}
+
+// Envelope in the top-right corner, left of the battery: an outline + flap,
+// lime with a count bubble while comments/replies are unread.
+static void build_mw_mail(lv_obj_t* parent) {
+    const int w = 40, h = 28;
+    const int x = L.scr_w - L.margin - L.batt_w - 22 - w;
+    const int y = L.batt_y + 6;
+    mw_mail = lv_obj_create(parent);
+    lv_obj_set_size(mw_mail, w, h);
+    lv_obj_set_pos(mw_mail, x, y);
+    lv_obj_set_style_bg_opa(mw_mail, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mw_mail, 3, 0);
+    lv_obj_set_style_radius(mw_mail, 4, 0);
+    lv_obj_set_style_pad_all(mw_mail, 0, 0);
+    lv_obj_clear_flag(mw_mail, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(mw_mail, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(mw_mail, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    const int iw = w - 6;   // points are inside the 3px border
+    mw_flap_pts[0] = {1, 1};
+    mw_flap_pts[1] = {(lv_value_precise_t)(iw / 2), (lv_value_precise_t)(h / 2)};
+    mw_flap_pts[2] = {(lv_value_precise_t)(iw - 1), 1};
+    mw_mail_flap = lv_line_create(mw_mail);
+    lv_line_set_points(mw_mail_flap, mw_flap_pts, 3);
+    lv_obj_set_style_line_width(mw_mail_flap, 3, 0);
+    lv_obj_set_style_line_rounded(mw_mail_flap, true, 0);
+    lv_obj_set_pos(mw_mail_flap, 0, 0);
+
+    mw_badge = lv_obj_create(parent);
+    lv_obj_set_size(mw_badge, 26, 26);
+    lv_obj_set_pos(mw_badge, x + w - 12, y - 14);
+    lv_obj_set_style_radius(mw_badge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(mw_badge, COL_BAMBU, 0);
+    lv_obj_set_style_bg_opa(mw_badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(mw_badge, COL_BG, 0);
+    lv_obj_set_style_border_width(mw_badge, 3, 0);
+    lv_obj_set_style_pad_all(mw_badge, 0, 0);
+    lv_obj_clear_flag(mw_badge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(mw_badge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(mw_badge, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lbl_mw_badge = lv_label_create(mw_badge);
+    lv_obj_set_style_text_font(lbl_mw_badge, &font_styrene_14, 0);
+    lv_obj_set_style_text_color(lbl_mw_badge, COL_BG, 0);
+    lv_obj_center(lbl_mw_badge);
+
+    lv_obj_add_flag(mw_mail, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(mw_badge, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Combined layout geometry (480x480 ring boards)
+static const int CB_RING_D = 250, CB_RING_W = 18, CB_CY = 206;
+static const int CB_SMALL_D = 128, CB_AVATAR = 44;
+
+// 999 → "999", 5230 → "5.2K", 12400 → "12K", 1250000 → "1.3M"
+static void fmt_count(int n, char* buf, size_t len) {
+    if (n < 1000)            snprintf(buf, len, "%d", n);
+    else if (n < 10000)      snprintf(buf, len, "%d.%dK", n / 1000, (n % 1000) / 100);
+    else if (n < 1000000)    snprintf(buf, len, "%dK", n / 1000);
+    else                     snprintf(buf, len, "%d.%dM", n / 1000000, (n % 1000000) / 100000);
+    size_t l = strlen(buf);   // "5.0K" → "5K"
+    if (l > 3 && buf[l - 3] == '.' && buf[l - 2] == '0') { buf[l - 3] = buf[l - 1]; buf[l - 2] = '\0'; }
+}
+
+static lv_obj_t* make_stat(lv_obj_t* parent, const lv_font_t* font) {
+    lv_obj_t* l = make_ring_label(parent, font, COL_BAMBU);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    return l;
+}
+
+static void build_mw_widgets(lv_obj_t* parent) {
+    build_mw_mail(parent);
+    lbl_cb_status = make_ring_label(parent, &font_styrene_24, COL_TEXT);
+    lv_obj_add_flag(lbl_cb_status, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < 2; i++) {   // drawn first so the numbers sit on top
+        cb_small_ring[i] = lv_arc_create(parent);
+        lv_obj_set_size(cb_small_ring[i], CB_SMALL_D, CB_SMALL_D);
+        lv_arc_set_bg_angles(cb_small_ring[i], 0, 360);
+        lv_arc_set_value(cb_small_ring[i], 0);
+        lv_obj_remove_style(cb_small_ring[i], NULL, LV_PART_KNOB);
+        lv_obj_clear_flag(cb_small_ring[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(cb_small_ring[i], LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_set_style_arc_width(cb_small_ring[i], 6, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(cb_small_ring[i], 0, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(cb_small_ring[i], COL_BAMBU, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(cb_small_ring[i], LV_OPA_40, LV_PART_MAIN);
+        lv_obj_add_flag(cb_small_ring[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    for (int i = 0; i < CB_STATS; i++) {
+        lbl_cb_num[i] = make_stat(parent, &font_tiempos_84);
+        lbl_cb_cap[i] = make_stat(parent, &font_styrene_20);
+    }
+
+    cb_avatar_wrap = lv_obj_create(parent);   // circle that clips the square avatar
+    lv_obj_set_size(cb_avatar_wrap, CB_AVATAR, CB_AVATAR);
+    lv_obj_set_style_radius(cb_avatar_wrap, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_clip_corner(cb_avatar_wrap, true, 0);
+    lv_obj_set_style_border_width(cb_avatar_wrap, 0, 0);
+    lv_obj_set_style_pad_all(cb_avatar_wrap, 0, 0);
+    lv_obj_set_style_bg_color(cb_avatar_wrap, COL_PANEL, 0);
+    lv_obj_clear_flag(cb_avatar_wrap, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(cb_avatar_wrap, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(cb_avatar_wrap, LV_OBJ_FLAG_EVENT_BUBBLE);
+    cb_avatar_img = lv_image_create(cb_avatar_wrap);
+    lv_obj_center(cb_avatar_img);
+    lv_obj_add_flag(cb_avatar_wrap, LV_OBJ_FLAG_HIDDEN);
+    lbl_cb_name = make_ring_label(parent, &font_styrene_24, COL_TEXT);
+    lv_label_set_long_mode(lbl_cb_name, LV_LABEL_LONG_DOT);
+    lv_obj_add_flag(lbl_cb_name, LV_OBJ_FLAG_HIDDEN);
+}
+
+// The classic page and the combined layout share the arc, the AMS dots and
+// most labels; each render puts them where its layout wants them.
+static void set_ring_geometry(bool combo) {
+    const int d = combo ? CB_RING_D : L.ring_d - 24;
+    const int w = combo ? CB_RING_W : 28;
+    const int cy = combo ? CB_CY : L.ring_cy;
+    lv_obj_clear_flag(arc_print, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(arc_print, d, d);
+    lv_obj_set_style_arc_width(arc_print, w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc_print, w, LV_PART_INDICATOR);
+    lv_obj_align(arc_print, LV_ALIGN_TOP_MID, 0, cy - d / 2);
+
+    const int dot = combo ? 20 : 26, gap = combo ? 10 : 16;
+    const int x0 = (L.scr_w - (PRINTER_TRAYS * dot + (PRINTER_TRAYS - 1) * gap)) / 2;
+    const int y = combo ? cy + d / 2 - 28 : L.ring_cy + L.ring_d / 2 - 46;
+    for (int i = 0; i < PRINTER_TRAYS; i++) {
+        lv_obj_set_size(pr_dots[i], dot, dot);
+        lv_obj_set_pos(pr_dots[i], x0 + i * (dot + gap), y);
+    }
+
+    // file name: wide strip at the bottom (classic) or inside the ring (combo)
+    lv_obj_set_style_text_font(lbl_pr_task, combo ? &font_styrene_16 : &font_styrene_20, 0);
+    lv_obj_set_width(lbl_pr_task, combo ? d - 2 * w - 40 : L.content_w - 40);
+    lv_obj_set_style_text_font(lbl_pr_pct, combo ? &font_tiempos_84 : &font_tiempos_120, 0);
+
+    lv_obj_t* classic_only[] = {lbl_pr_pct_sym, lbl_pr_line1};
+    for (lv_obj_t* o : classic_only) if (combo) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    if (!combo) {
+        lv_obj_t* idle_only[] = {cb_small_ring[0], cb_small_ring[1], cb_avatar_wrap, lbl_cb_name};
+        for (lv_obj_t* o : idle_only) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_style_arc_color(arc_print, COL_PANEL, LV_PART_MAIN);   // idle view tints it
+    lv_obj_set_style_arc_opa(arc_print, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_t* combo_only[1 + 2 * CB_STATS] = {lbl_cb_status};
+    for (int i = 0; i < CB_STATS; i++) { combo_only[1 + i] = lbl_cb_num[i]; combo_only[1 + CB_STATS + i] = lbl_cb_cap[i]; }
+    for (lv_obj_t* o : combo_only) {
+        if (combo) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else       lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void render_combo(void);
+static void count_anim_cb(void* var, int32_t v) {
+    st_shown[(intptr_t)var] = v;
+    render_combo();
+}
+
+// Text for a stat slot: what's on screen now (mid count-up or settled)
+static void stat_text(int slot, int target, char* buf, size_t len) {
+    if (st_target[slot] != target) {
+        bool first = st_target[slot] < 0;
+        st_target[slot] = target;
+        if (first) {
+            st_shown[slot] = target;
+        } else {
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, (void*)(intptr_t)slot);
+            lv_anim_set_exec_cb(&a, count_anim_cb);
+            lv_anim_set_values(&a, st_shown[slot], target);
+            lv_anim_set_duration(&a, 1200);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_start(&a);
+        }
+    }
+    fmt_count(st_shown[slot], buf, len);
+}
+
+// A big number that must fit `max_w`: try each font, largest first
+static void fit_number(lv_obj_t* lbl, const char* text, int max_w, const lv_font_t* const* fonts, int n) {
+    lv_label_set_text(lbl, text);
+    for (int i = 0; i < n; i++) {
+        lv_obj_set_style_text_font(lbl, fonts[i], 0);
+        lv_obj_update_layout(lbl);
+        if (lv_obj_get_width(lbl) <= max_w) return;
+    }
+}
+
+static void render_combo(void) {
+    const PrinterState* ps = &pr_last;
+    const MakerWorldState* ms = &mw_last;
+    set_ring_geometry(true);
+    char buf[48];
+    const char* gs = ps->gcode_state;
+    bool running  = !strcmp(gs, "RUNNING") || !strcmp(gs, "PREPARE");
+    bool paused   = !strcmp(gs, "PAUSE");
+    bool finished = !strcmp(gs, "FINISH");
+    bool failed   = !strcmp(gs, "FAILED");
+    bool active   = ps->has_report && (running || paused || finished || failed);
+    bool ok       = ms->has_data && ms->link != MW_EXPIRED;
+    // Printer idle and MakerWorld numbers in hand: the page becomes a MakerWorld card
+    bool idle_card = !active && ps->has_report && ok;
+
+    const int left = L.margin + 6 + BAMBU_LOGO_W + 8;
+    const int right = L.scr_w - L.margin - L.batt_w - 22 - 40 - 10;   // envelope's left edge
+    const int mid = (left + right) / 2;
+
+    // ---- title slot: avatar + name (idle card) or print status
+    int aw = 0, ah = 0;
+    const uint8_t* av = makerworld_avatar(&aw, &ah);
+    if (idle_card) {
+        lv_obj_add_flag(lbl_cb_status, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_cb_name, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(lbl_cb_name, ms->name[0] ? ms->name : "MakerWorld");
+        lv_obj_set_width(lbl_cb_name, LV_SIZE_CONTENT);
+        lv_obj_update_layout(lbl_cb_name);
+        const int gap = 10;
+        int name_w = lv_obj_get_width(lbl_cb_name);
+        int max_name = right - left - (av ? CB_AVATAR + gap : 0);
+        if (name_w > max_name) { name_w = max_name; lv_obj_set_width(lbl_cb_name, name_w); }
+        int total = (av ? CB_AVATAR + gap : 0) + name_w;
+        int x = mid - total / 2;
+        if (av) {
+            if (ms->avatar_seq != cb_avatar_seq) {
+                cb_avatar_seq = ms->avatar_seq;
+                memset(&cb_avatar_dsc, 0, sizeof(cb_avatar_dsc));
+                cb_avatar_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+                cb_avatar_dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
+                cb_avatar_dsc.header.w = aw;
+                cb_avatar_dsc.header.h = ah;
+                cb_avatar_dsc.header.stride = aw * 4;
+                cb_avatar_dsc.data = av;
+                cb_avatar_dsc.data_size = aw * ah * 4;
+                lv_image_set_src(cb_avatar_img, &cb_avatar_dsc);   // fetched at CB_AVATAR px: no scaling
+                lv_obj_center(cb_avatar_img);
+            }
+            lv_obj_clear_flag(cb_avatar_wrap, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(cb_avatar_wrap, x, L.batt_y + 22 - CB_AVATAR / 2);
+            x += CB_AVATAR + gap;
+        } else {
+            lv_obj_add_flag(cb_avatar_wrap, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_set_pos(lbl_cb_name, x, L.batt_y + 10);
+    } else {
+        lv_obj_add_flag(cb_avatar_wrap, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lbl_cb_name, LV_OBJ_FLAG_HIDDEN);
+        lv_color_t st_col = COL_TEXT;
+        if (ps->link == PRINTER_UNCONFIGURED)     { snprintf(buf, sizeof(buf), "Printer not set up"); st_col = COL_DIM; }
+        else if (ps->link == PRINTER_AUTH_FAILED) { snprintf(buf, sizeof(buf), "Check access code"); st_col = COL_RED; }
+        else if (!ps->has_report)                 { snprintf(buf, sizeof(buf), "Connecting"); st_col = COL_DIM; }
+        else if (failed)                          { snprintf(buf, sizeof(buf), "Check the printer"); st_col = COL_RED; }
+        else if (finished)                        { snprintf(buf, sizeof(buf), "Ready to collect"); st_col = COL_BAMBU; }
+        else if (running || paused)               format_left(ps->remain_min, buf, sizeof(buf));
+        else                                      { snprintf(buf, sizeof(buf), "Printer idle"); st_col = COL_DIM; }
+        lv_obj_clear_flag(lbl_cb_status, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(lbl_cb_status, buf);
+        lv_obj_set_style_text_font(lbl_cb_status, strlen(buf) > 15 ? &font_styrene_20 : &font_styrene_24, 0);
+        lv_obj_set_style_text_color(lbl_cb_status, st_col, 0);
+        lv_obj_update_layout(lbl_cb_status);
+        lv_obj_set_pos(lbl_cb_status, mid - lv_obj_get_width(lbl_cb_status) / 2, L.batt_y + 10);
+    }
+
+    // ---- stats (slot values drive the count-up)
+    int sl[CB_STATS];
+    const char* caps[CB_STATS];
+    if (ms->has_points) {
+        sl[0] = ST_FANS;  caps[0] = ms->fans == 1 ? "follower" : "followers";
+        sl[1] = ST_POINTS; caps[1] = "points";
+        sl[2] = ST_BOOSTS; caps[2] = ms->boosts == 1 ? "boost" : "boosts";
+    } else {
+        sl[0] = ST_LIKES; caps[0] = "likes";
+        sl[1] = ST_FANS;  caps[1] = ms->fans == 1 ? "follower" : "followers";
+        sl[2] = ST_DOWNLOADS; caps[2] = "downloads";
+    }
+    const int val[ST_COUNT] = {ms->points, ms->fans, ms->boosts, ms->likes, ms->downloads};
+    char txt[CB_STATS][16];
+    for (int i = 0; i < CB_STATS; i++) {
+        if (ok) stat_text(sl[i], val[sl[i]], txt[i], sizeof(txt[i]));
+        else    strcpy(txt[i], "0");
+    }
+
+    // ---- ring
+    int pct = finished ? 100 : (active ? ps->pct : 0);
+    lv_color_t col = failed ? COL_RED : paused ? COL_DIM : COL_BAMBU;
+    lv_arc_set_value(arc_print, pct);
+    lv_obj_set_style_arc_color(arc_print, col, LV_PART_INDICATOR);
+    lv_label_set_text(lbl_pr_line2, "");
+    lv_label_set_text(lbl_pr_task, "");
+    const int inner = CB_RING_D - 2 * CB_RING_W - 24;
+    if (active) {
+        lv_obj_add_flag(lbl_pr_word, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_pr_pct, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(lbl_pr_caption, col, 0);
+        lv_label_set_text(lbl_pr_caption, failed ? "FAILED" : finished ? "DONE" : paused ? "PAUSED"
+                                          : !strcmp(gs, "PREPARE") ? "PREPARING" : "PRINTING");
+        lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, CB_CY - 74);
+        lv_obj_set_style_text_color(lbl_pr_pct, COL_TEXT, 0);
+        lv_obj_set_style_text_font(lbl_pr_pct, &font_tiempos_84, 0);
+        lv_label_set_text_fmt(lbl_pr_pct, "%d%%", pct);
+        lv_obj_align(lbl_pr_pct, LV_ALIGN_TOP_MID, 0, CB_CY - 50);
+        if (ps->total_layer > 0) {
+            snprintf(buf, sizeof(buf), "Layer %d / %d", ps->layer, ps->total_layer);
+            lv_label_set_text(lbl_pr_line2, buf);
+        }
+        lv_obj_align(lbl_pr_line2, LV_ALIGN_TOP_MID, 0, CB_CY + 22);
+        lv_label_set_text(lbl_pr_task, ps->task);
+        lv_obj_align(lbl_pr_task, LV_ALIGN_TOP_MID, 0, CB_CY + 44);
+    } else if (idle_card) {
+        // the ring stays as a frame (tinted lime) around the headline number
+        lv_obj_set_style_arc_color(arc_print, COL_BAMBU, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(arc_print, LV_OPA_40, LV_PART_MAIN);
+        lv_obj_add_flag(lbl_pr_word, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_pr_pct, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(lbl_pr_caption, COL_DIM, 0);
+        lv_label_set_text(lbl_pr_caption, ms->has_points ? "POINTS" : "FOLLOWERS");
+        lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, CB_CY - 70);
+        lv_obj_set_style_text_color(lbl_pr_pct, COL_BAMBU, 0);
+        static const lv_font_t* const big[] = {&font_tiempos_120, &font_tiempos_84};
+        fit_number(lbl_pr_pct, txt[1], inner, big, 2);
+        int h = lv_obj_get_height(lbl_pr_pct);
+        lv_obj_align(lbl_pr_pct, LV_ALIGN_TOP_MID, 0, CB_CY - h / 2 + 8);
+    } else {
+        lv_obj_add_flag(lbl_pr_pct, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_pr_word, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(lbl_pr_caption, COL_DIM, 0);
+        lv_label_set_text(lbl_pr_caption, "PRINTER");
+        lv_obj_align(lbl_pr_caption, LV_ALIGN_TOP_MID, 0, CB_CY - 52);
+        lv_obj_set_style_text_font(lbl_pr_word, &font_tiempos_56, 0);
+        lv_label_set_text(lbl_pr_word, ps->link == PRINTER_AUTH_FAILED ? "Code?" : !ps->has_report ? "..." : "Idle");
+        lv_obj_align(lbl_pr_word, LV_ALIGN_TOP_MID, 0, CB_CY - 22);
+    }
+
+    // ---- bottom stats
+    if (idle_card) {
+        // corner stats in their own small rings; the headline lives in the big ring
+        lv_obj_add_flag(lbl_cb_num[1], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lbl_cb_cap[1], LV_OBJ_FLAG_HIDDEN);
+        const int ry = CB_CY + CB_RING_D / 2 + 4 + CB_SMALL_D / 2 - 18;   // ring centre y
+        const int rx[2] = {CB_SMALL_D / 2 + 14, L.scr_w - CB_SMALL_D / 2 - 14};
+        static const lv_font_t* const small[] = {&font_tiempos_56, &font_tiempos_34};
+        for (int k = 0; k < 2; k++) {
+            int i = k == 0 ? 0 : 2;
+            lv_obj_clear_flag(cb_small_ring[k], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(cb_small_ring[k], rx[k] - CB_SMALL_D / 2, ry - CB_SMALL_D / 2);
+            lv_obj_set_style_opa(lbl_cb_num[i], LV_OPA_COVER, 0);
+            fit_number(lbl_cb_num[i], txt[i], CB_SMALL_D - 30, small, 2);
+            lv_label_set_text(lbl_cb_cap[i], caps[i]);
+            lv_obj_set_style_text_font(lbl_cb_cap[i], &font_styrene_16, 0);
+            lv_obj_set_style_text_color(lbl_cb_cap[i], COL_DIM, 0);
+            lv_obj_update_layout(lbl_cb_cap[i]);
+            int nh = lv_obj_get_height(lbl_cb_num[i]);
+            lv_obj_set_pos(lbl_cb_num[i], rx[k] - lv_obj_get_width(lbl_cb_num[i]) / 2, ry - nh / 2 - 8);
+            lv_obj_set_pos(lbl_cb_cap[i], rx[k] - lv_obj_get_width(lbl_cb_cap[i]) / 2, ry + nh / 2 - 10);
+        }
+    } else {
+        lv_obj_add_flag(cb_small_ring[0], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(cb_small_ring[1], LV_OBJ_FLAG_HIDDEN);
+        const int top = CB_CY + CB_RING_D / 2 + 4;
+        const int col_w = L.scr_w / CB_STATS - 16;   // keep clear of the panel edge and the neighbours
+        static const lv_font_t* const row[] = {&font_tiempos_84, &font_tiempos_56};
+        for (int i = 0; i < CB_STATS; i++) {
+            int cx = L.scr_w * (2 * i + 1) / (2 * CB_STATS) + (i == 0 ? 6 : i == CB_STATS - 1 ? -6 : 0);
+            lv_obj_set_style_opa(lbl_cb_num[i], ok ? LV_OPA_COVER : LV_OPA_30, 0);
+            fit_number(lbl_cb_num[i], txt[i], col_w, row, 2);
+            int ny = lv_obj_get_style_text_font(lbl_cb_num[i], LV_PART_MAIN) == &font_tiempos_84 ? top : top + 16;
+            bool expired_note = i == 1 && ms->link == MW_EXPIRED;
+            lv_label_set_text(lbl_cb_cap[i], expired_note ? "sign in again" : caps[i]);
+            lv_obj_set_style_text_font(lbl_cb_cap[i], &font_styrene_20, 0);
+            lv_obj_set_style_text_color(lbl_cb_cap[i], expired_note ? COL_RED : COL_BAMBU, 0);
+            lv_obj_update_layout(lbl_cb_cap[i]);
+            lv_obj_set_pos(lbl_cb_num[i], cx - lv_obj_get_width(lbl_cb_num[i]) / 2, ny);
+            lv_obj_set_pos(lbl_cb_cap[i], cx - lv_obj_get_width(lbl_cb_cap[i]) / 2, top + 76);
+        }
+    }
+
+    // ---- AMS dots sit in the ring's bottom gap; the idle card doesn't need them
+    for (int i = 0; i < PRINTER_TRAYS; i++) {
+        lv_obj_t* d = pr_dots[i];
+        bool show = ps->has_report && i < ps->tray_count && !idle_card;
+        if (!show) { lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(d, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(d, lv_color_hex(ps->tray_rgb[i]), 0);
+        lv_obj_set_style_bg_opa(d, ps->tray_loaded[i] ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        bool on = (i == ps->tray_now) && (running || paused);
+        lv_obj_set_style_border_color(d, on ? COL_TEXT : COL_DIM, 0);
+        lv_obj_set_style_border_opa(d, on ? LV_OPA_COVER : LV_OPA_50, 0);
+        lv_obj_set_style_border_width(d, on ? 4 : 2, 0);
+    }
+}
+
+// Envelope: points mode only (public mode has no unread count)
+static void mw_render_mail(void) {
+    const MakerWorldState* ms = &mw_last;
+    bool show = ms->link != MW_OFF && ms->has_points && ms->has_data;
+    if (!show) {
+        lv_obj_add_flag(mw_mail, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(mw_badge, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    bool unread = ms->new_comments > 0;
+    lv_color_t c = unread ? COL_BAMBU : COL_DIM;
+    lv_obj_set_style_border_color(mw_mail, c, 0);
+    lv_obj_set_style_border_opa(mw_mail, unread ? LV_OPA_COVER : LV_OPA_60, 0);
+    lv_obj_set_style_line_color(mw_mail_flap, c, 0);
+    lv_obj_set_style_line_opa(mw_mail_flap, unread ? LV_OPA_COVER : LV_OPA_60, 0);
+    lv_obj_clear_flag(mw_mail, LV_OBJ_FLAG_HIDDEN);
+    if (unread) {
+        lv_label_set_text_fmt(lbl_mw_badge, "%d", ms->new_comments > 9 ? 9 : ms->new_comments);
+        lv_obj_center(lbl_mw_badge);
+        lv_obj_clear_flag(mw_badge, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(mw_badge, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // ======== Public API ========
@@ -999,7 +1379,6 @@ void ui_init(void) {
 
     init_usage_screen(scr);
     if (L.ring) build_printer_screen(scr);
-    if (L.ring) build_makerworld_screen(scr);
     splash_init(scr);
 
     if (splash_get_root()) {
@@ -1148,7 +1527,20 @@ static void update_view_state(void) {
                       LV_OBJ_FLAG_HIDDEN);
 }
 
+// Always-on AMOLED: nudge the printer page a few pixels every 2 minutes so
+// static numbers don't burn in. Too small and slow to notice.
+static void burn_in_shift(void) {
+    static const int8_t path[][2] = {{0,0},{3,0},{3,3},{0,3},{-3,3},{-3,0},{-3,-3},{0,-3},{3,-3}};
+    static uint32_t last = 0;
+    static uint8_t k = 0;
+    if (!printer_container || lv_tick_get() - last < 120000) return;
+    last = lv_tick_get();
+    k = (k + 1) % (sizeof(path) / sizeof(path[0]));
+    lv_obj_set_pos(printer_container, path[k][0], path[k][1]);
+}
+
 void ui_tick_anim(void) {
+    burn_in_shift();
     if (current_screen == SCREEN_SPLASH) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
@@ -1218,21 +1610,17 @@ static void apply_battery_visibility(void) {
 static void global_click_cb(lv_event_t* e) {
     (void)e;
 #ifdef PRINTER_ONLY
-    // printer-only build: taps flip printer <-> MakerWorld once signed in, else do nothing
-    if (mw_enabled && mw_container)
-        ui_show_screen(current_screen == SCREEN_MAKERWORLD ? SCREEN_PRINTER : SCREEN_MAKERWORLD);
+    idle_sleep_now();   // printer-only build: one always-on page; a tap blacks it out, the next tap wakes it
     return;
 #endif
     if (current_screen == SCREEN_SPLASH)                         ui_show_screen(SCREEN_USAGE);
     else if (current_screen == SCREEN_USAGE && printer_container) ui_show_screen(SCREEN_PRINTER);
-    else if (current_screen == SCREEN_PRINTER && mw_enabled && mw_container) ui_show_screen(SCREEN_MAKERWORLD);
     else                                                          ui_show_screen(SCREEN_SPLASH);
 }
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
     if (printer_container) lv_obj_add_flag(printer_container, LV_OBJ_FLAG_HIDDEN);
-    if (mw_container) lv_obj_add_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
 
     switch (screen) {
@@ -1246,18 +1634,15 @@ void ui_show_screen(screen_t screen) {
             lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
         }
         break;
-    case SCREEN_MAKERWORLD:
-        if (mw_container) {
-            lv_obj_clear_flag(mw_container, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            screen = SCREEN_USAGE;
-            lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
-        }
-        break;
     default: break;
     }
-    if (screen == SCREEN_SPLASH) lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
-    else                         lv_obj_clear_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
+#ifdef PRINTER_ONLY
+    const bool title_free = false;   // no clock source in this build; the slot is MakerWorld's
+#else
+    const bool title_free = !(screen == SCREEN_PRINTER && mw_enabled);
+#endif
+    if (screen == SCREEN_SPLASH || !title_free) lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
+    else                                        lv_obj_clear_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
 
     splash_mascot_set_visible(screen == SCREEN_USAGE);
     if (logo_img) {

@@ -255,7 +255,6 @@ void setup() {
 #ifdef BOARD_SIM
     if (getenv("SIM_START_USAGE")) ui_show_screen(SCREEN_USAGE);   // headless shots of the usage view
     if (getenv("SIM_START_PRINTER")) ui_show_screen(SCREEN_PRINTER);
-    if (getenv("SIM_START_MW")) ui_show_screen(SCREEN_MAKERWORLD);
 #endif
 
 #ifdef PRINTER_ONLY
@@ -443,6 +442,7 @@ void loop() {
     {
         static MakerWorldState ms;
         static int last_comments = -1;   // -1 = no fetch yet: don't alert on boot
+        static int last_points = -1;
         if (makerworld_get(&ms)) {
             ui_update_makerworld(&ms);
             if (ms.has_data) {
@@ -453,6 +453,12 @@ void loop() {
                     sound_hal_play_reset();
                 }
                 last_comments = ms.new_comments;
+                // the daily payout (~3 pm Pacific): the number counts up on screen; chime with it
+                if (ms.has_points && last_points >= 0 && ms.points > last_points) {
+                    Serial.printf("mw: points %d -> %d\n", last_points, ms.points);
+                    sound_hal_play_reset();
+                }
+                last_points = ms.points;
             }
         }
     }

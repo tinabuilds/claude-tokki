@@ -20,3 +20,7 @@ bool idle_consume_wake_press(void);
 // sleeves, etc.). Callers use this to silently drop touch events while the
 // panel is dark.
 bool idle_is_asleep(void);
+
+// Fade to black now and stay dark (even on USB power) until a touch, a button
+// or idle_note_activity() (print done, new comment) wakes it.
+void idle_sleep_now(void);

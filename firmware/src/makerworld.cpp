@@ -28,6 +28,7 @@ static char pending_email[96] = "";
 static char pending_code[16] = "";
 
 static String uid, token;
+static String avatar_url, avatar_loaded;   // profile avatar, and the one on screen
 
 static void publish_state() {
     xSemaphoreTake(lock, portMAX_DELAY);
@@ -43,7 +44,7 @@ static void set_link(mw_link_t l) {
 
 static void load_cfg() {
     Preferences p;
-    p.begin("mw", true);
+    p.begin("mw", false);   // read-write so a fresh board creates the namespace instead of logging NOT_FOUND
     uid = p.getString("uid", "");
     token = p.getString("tok", "");
     bool expired = p.getBool("expired", false);   // a rejected token stays rejected across reboots
@@ -59,6 +60,7 @@ static int api(const char* path, const char* body, String* out) {
     HTTPClient http;
     http.setTimeout(12000);
     if (!http.begin(net, String(API) + path)) return -1;
+    http.setUserAgent("ClaudeTokki/1.1");   // the default "ESP32HTTPClient" gets a Cloudflare 403
     http.addHeader("Content-Type", "application/json");
     if (token.length()) http.addHeader("Authorization", "Bearer " + token);
     int code = body ? http.POST(String(body)) : http.GET();
@@ -131,6 +133,7 @@ static void forget() {
     p.clear();
     p.end();
     uid = token = "";
+    avatar_loaded = "";
     work = {};
     publish_state();
     Serial.println("mw: signed out");
@@ -145,6 +148,40 @@ static void mark_expired() {
     set_link(MW_EXPIRED);
 }
 
+// The image CDN resizes on request: a 44px PNG (the on-screen size) is a few KB
+// instead of the 450 KB original.
+static bool fetch_avatar() {
+    WiFiClientSecure net;
+    net.setCACert(BAMBU_API_ROOT_CA);   // same DigiCert root as the API
+    HTTPClient http;
+    http.setTimeout(12000);
+    http.setUserAgent("ClaudeTokki/1.1");
+    String url = avatar_url + "?x-oss-process=image/resize,w_44,h_44/format,png";
+    if (!http.begin(net, url)) { Serial.println("mw: avatar url rejected"); return false; }
+    int st = http.GET();
+    int len = http.getSize();
+    const char* why = nullptr;
+    if (st != 200)                       why = "http";
+    else if (len <= 0 || len >= 65536)   why = "size";
+    uint8_t* png = why ? nullptr : (uint8_t*)malloc(len);
+    if (!why && !png)                    why = "memory";
+    if (!why) {
+        WiFiClient* in = http.getStreamPtr();
+        int got = 0;
+        uint32_t t0 = millis();
+        while (got < len && millis() - t0 < 10000) {   // TLS hands bytes over in chunks
+            int n = in->available() ? in->read(png + got, len - got) : 0;
+            if (n > 0) got += n; else delay(5);
+        }
+        if (got != len)                                   why = "short read";
+        else if (!makerworld_set_avatar_png(png, len))    why = "decode";
+    }
+    free(png);
+    http.end();
+    if (why) Serial.printf("mw: avatar download failed (%s, status %d, size %d)\n", why, st, len);
+    return !why;
+}
+
 // Returns true when the numbers were refreshed.
 static bool fetch() {
     String resp;
@@ -153,6 +190,8 @@ static bool fetch() {
     filter["likeCount"] = true;
     filter["downloadCount"] = true;
     filter["point"] = true;
+    filter["name"] = true;
+    filter["avatar"] = true;
 
     MakerWorldState next = work;
     if (token.length()) {
@@ -167,10 +206,13 @@ static bool fetch() {
         next.likes = d["likeCount"] | 0;
         next.downloads = d["downloadCount"] | 0;
         next.points = d["point"] | 0;
+        strlcpy(next.name, d["name"] | "", sizeof(next.name));
+        avatar_url = d["avatar"] | "";
 
-        if (api("/v1/point-service/boost/boostingright", nullptr, &resp) == 200) {
+        // totalIncome = every boost ever received (redeemed or not)
+        if (api("/v1/point-service/boost/boostbill?offset=0&limit=1", nullptr, &resp) == 200) {
             JsonDocument b;
-            if (!deserializeJson(b, resp)) next.boost_tokens = b["availableTotal"] | 0;
+            if (!deserializeJson(b, resp)) next.boosts = b["totalIncome"] | 0;
         }
         if (api("/v1/user-service/my/message/count", nullptr, &resp) == 200) {
             JsonDocument m;
@@ -186,6 +228,12 @@ static bool fetch() {
         next.fans = d["fanCount"] | 0;
         next.likes = d["likeCount"] | 0;
         next.downloads = d["downloadCount"] | 0;
+        strlcpy(next.name, d["name"] | "", sizeof(next.name));
+        avatar_url = d["avatar"] | "";
+    }
+    if (avatar_url.length() && avatar_url != avatar_loaded && fetch_avatar()) {
+        avatar_loaded = avatar_url;
+        next.avatar_seq++;
     }
     next.has_points = token.length() > 0;
     next.has_data = true;
@@ -245,7 +293,9 @@ bool makerworld_cmd(const char* json) {
     JsonDocument doc;
     if (deserializeJson(doc, json)) return false;
     if (doc["off"] | false) { want_off = true; return true; }
-    if (doc["email"].is<const char*>()) {
+    if (doc["email"].is<const char*>() && doc["code"].is<const char*>()) {   // both at once: sign in, no new code
+        strlcpy(pending_email, doc["email"], sizeof(pending_email));
+    } else if (doc["email"].is<const char*>()) {
         strlcpy(pending_email, doc["email"], sizeof(pending_email));
         want_code = true;
         return true;
